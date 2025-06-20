@@ -1,0 +1,44 @@
+# Generated images
+*.pgm
+*.jpg
+*.png
+*.bmp
+
+# Compiled binaries
+diffusion_model
+diffusion_model_v2
+diffusion_model_v3
+diffusion_model_v3_2
+diffusion_model_*
+view_images
+view_training_data
+
+# Build artifacts
+*.o
+*.a
+*.so
+*.dylib
+
+# macOS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+debug.txt
+
+# Temporary files
+temp_*
+tmp_* 
