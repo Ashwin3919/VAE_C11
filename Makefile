@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -Wall -Wextra -O3 -std=c99 -march=native -ffast-math
+CFLAGS = -Wall -Wextra -O3 -std=c99 -march=native -ffast-math -funroll-loops -ftree-vectorize -flto -fomit-frame-pointer
 LIBS = -lm
 
 # Main target

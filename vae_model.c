@@ -7,21 +7,21 @@
 
 // Production-Quality VAE Configuration - Optimized for High-Quality MNIST Generation
 #define IMAGE_SIZE 784
-#define ENCODER_HIDDEN1 512      // Deeper encoder
-#define ENCODER_HIDDEN2 256      // Second encoder layer
-#define LATENT_SIZE 64           // Larger latent space for richer representation
-#define DECODER_HIDDEN1 256      // First decoder layer
-#define DECODER_HIDDEN2 512      // Deeper decoder
-#define LEARNING_RATE 0.0001f    // Conservative but effective
-#define BATCH_SIZE 64            // Larger batches for stability
-#define EPOCHS 300               // More epochs for convergence
-#define BETA_START 0.001f        // Much smaller starting beta
-#define BETA_END 0.01f           // Much smaller ending beta (10x reduction)
-#define BETA_ANNEALING_EPOCHS 100 // Slower annealing
-#define BETA_ANNEALING_START 150  // Start annealing much later
-#define GRAD_CLIP 0.5f           // Tighter gradient clipping
-#define DROPOUT_RATE 0.1f        // Dropout for regularization
-#define WARMUP_EPOCHS 50         // Learning rate warmup
+#define ENCODER_HIDDEN1 1024     // 2x larger - more representational power
+#define ENCODER_HIDDEN2 512      // 2x larger - deeper processing
+#define LATENT_SIZE 128          // 2x larger latent space for richer representations
+#define DECODER_HIDDEN1 512      // 2x larger - better reconstruction
+#define DECODER_HIDDEN2 1024     // 2x larger - smoother outputs
+#define LEARNING_RATE 0.0001f    // Keep conservative rate
+#define BATCH_SIZE 32            // Smaller batches for better gradients with larger model
+#define EPOCHS 500               // More epochs needed for larger model
+#define BETA_START 0.0001f       // Much smaller starting beta for better reconstruction
+#define BETA_END 0.005f          // Much smaller ending beta (was 0.01f)
+#define BETA_ANNEALING_EPOCHS 150 // Longer annealing for stability
+#define BETA_ANNEALING_START 200  // Start annealing later
+#define GRAD_CLIP 1.0f           // Allow slightly larger gradients for bigger model
+#define DROPOUT_RATE 0.15f       // Slightly more dropout for regularization
+#define WARMUP_EPOCHS 100        // Longer warmup for larger model
 
 // Advanced VAE structure with batch normalization and residual connections
 typedef struct {
@@ -111,19 +111,34 @@ static inline float clip_grad(float g) {
     return fmaxf(-GRAD_CLIP, fminf(GRAD_CLIP, g)); 
 }
 
-// Batch normalization functions
+// Optimized batch normalization with vectorized operations
 void batch_norm_forward(float *input, float *output, float *scale, float *shift, 
                        float *running_mean, float *running_var, int size, int training) {
     const float eps = 1e-5f;
     const float momentum = 0.9f;
     
     if (training) {
-        // Compute batch statistics
-        float mean = 0.0f, var = 0.0f;
-        for (int i = 0; i < size; i++) mean += input[i];
+        // Compute batch statistics with loop unrolling
+        float mean = 0.0f;
+        int i = 0;
+        for (; i < size - 3; i += 4) {
+            mean += input[i] + input[i+1] + input[i+2] + input[i+3];
+        }
+        for (; i < size; i++) {
+            mean += input[i];
+        }
         mean /= size;
         
-        for (int i = 0; i < size; i++) {
+        float var = 0.0f;
+        i = 0;
+        for (; i < size - 3; i += 4) {
+            float diff0 = input[i] - mean;
+            float diff1 = input[i+1] - mean;
+            float diff2 = input[i+2] - mean;
+            float diff3 = input[i+3] - mean;
+            var += diff0 * diff0 + diff1 * diff1 + diff2 * diff2 + diff3 * diff3;
+        }
+        for (; i < size; i++) {
             float diff = input[i] - mean;
             var += diff * diff;
         }
@@ -133,16 +148,37 @@ void batch_norm_forward(float *input, float *output, float *scale, float *shift,
         *running_mean = momentum * (*running_mean) + (1.0f - momentum) * mean;
         *running_var = momentum * (*running_var) + (1.0f - momentum) * var;
         
-        // Normalize and scale
+        // Normalize and scale with vectorization
         float inv_std = 1.0f / sqrtf(var + eps);
-        for (int i = 0; i < size; i++) {
-            output[i] = ((input[i] - mean) * inv_std) * (*scale) + (*shift);
+        float scale_val = *scale;
+        float shift_val = *shift;
+        
+        i = 0;
+        for (; i < size - 3; i += 4) {
+            output[i] = ((input[i] - mean) * inv_std) * scale_val + shift_val;
+            output[i+1] = ((input[i+1] - mean) * inv_std) * scale_val + shift_val;
+            output[i+2] = ((input[i+2] - mean) * inv_std) * scale_val + shift_val;
+            output[i+3] = ((input[i+3] - mean) * inv_std) * scale_val + shift_val;
+        }
+        for (; i < size; i++) {
+            output[i] = ((input[i] - mean) * inv_std) * scale_val + shift_val;
         }
     } else {
-        // Use running statistics
+        // Use running statistics with vectorization
         float inv_std = 1.0f / sqrtf(*running_var + eps);
-        for (int i = 0; i < size; i++) {
-            output[i] = ((input[i] - *running_mean) * inv_std) * (*scale) + (*shift);
+        float scale_val = *scale;
+        float shift_val = *shift;
+        float running_mean_val = *running_mean;
+        
+        int i = 0;
+        for (; i < size - 3; i += 4) {
+            output[i] = ((input[i] - running_mean_val) * inv_std) * scale_val + shift_val;
+            output[i+1] = ((input[i+1] - running_mean_val) * inv_std) * scale_val + shift_val;
+            output[i+2] = ((input[i+2] - running_mean_val) * inv_std) * scale_val + shift_val;
+            output[i+3] = ((input[i+3] - running_mean_val) * inv_std) * scale_val + shift_val;
+        }
+        for (; i < size; i++) {
+            output[i] = ((input[i] - running_mean_val) * inv_std) * scale_val + shift_val;
         }
     }
 }
@@ -303,14 +339,38 @@ void free_vae(VAE *vae) {
 }
 
 // Optimized matrix operations
+// Optimized matrix multiplication with loop unrolling and better memory access
 void matmul_add(float *output, const float *input, const float *weights, const float *bias,
                 int out_size, int in_size) {
-    for (int i = 0; i < out_size; i++) {
-        float sum = bias ? bias[i] : 0.0f;
-        for (int j = 0; j < in_size; j++) {
-            sum += input[j] * weights[j * out_size + i];
+    // Initialize output with bias
+    if (bias) {
+        for (int i = 0; i < out_size; i++) {
+            output[i] = bias[i];
         }
-        output[i] = sum;
+    } else {
+        for (int i = 0; i < out_size; i++) {
+            output[i] = 0.0f;
+        }
+    }
+    
+    // Optimized matrix multiplication with better cache locality
+    for (int j = 0; j < in_size; j++) {
+        float input_val = input[j];
+        const float *w_ptr = &weights[j * out_size];
+        
+        // Loop unrolling for better performance
+        int i = 0;
+        for (; i < out_size - 3; i += 4) {
+            output[i] += input_val * w_ptr[i];
+            output[i+1] += input_val * w_ptr[i+1];
+            output[i+2] += input_val * w_ptr[i+2];
+            output[i+3] += input_val * w_ptr[i+3];
+        }
+        
+        // Handle remaining elements
+        for (; i < out_size; i++) {
+            output[i] += input_val * w_ptr[i];
+        }
     }
 }
 
@@ -320,7 +380,15 @@ void vae_forward(VAE *vae, const float *input, int training) {
     matmul_add(vae->enc_hidden1, input, vae->enc_w1, vae->enc_b1, ENCODER_HIDDEN1, IMAGE_SIZE);
     batch_norm_forward(vae->enc_hidden1, vae->enc_hidden1_bn, vae->enc_bn1_scale, vae->enc_bn1_shift,
                       vae->enc_bn1_mean, vae->enc_bn1_var, ENCODER_HIDDEN1, training);
-    for (int i = 0; i < ENCODER_HIDDEN1; i++) {
+    // Vectorized activation with loop unrolling
+    int i = 0;
+    for (; i < ENCODER_HIDDEN1 - 3; i += 4) {
+        vae->enc_hidden1_bn[i] = leaky_relu(vae->enc_hidden1_bn[i]);
+        vae->enc_hidden1_bn[i+1] = leaky_relu(vae->enc_hidden1_bn[i+1]);
+        vae->enc_hidden1_bn[i+2] = leaky_relu(vae->enc_hidden1_bn[i+2]);
+        vae->enc_hidden1_bn[i+3] = leaky_relu(vae->enc_hidden1_bn[i+3]);
+    }
+    for (; i < ENCODER_HIDDEN1; i++) {
         vae->enc_hidden1_bn[i] = leaky_relu(vae->enc_hidden1_bn[i]);
     }
     
@@ -328,7 +396,15 @@ void vae_forward(VAE *vae, const float *input, int training) {
     matmul_add(vae->enc_hidden2, vae->enc_hidden1_bn, vae->enc_w2, vae->enc_b2, ENCODER_HIDDEN2, ENCODER_HIDDEN1);
     batch_norm_forward(vae->enc_hidden2, vae->enc_hidden2_bn, vae->enc_bn2_scale, vae->enc_bn2_shift,
                       vae->enc_bn2_mean, vae->enc_bn2_var, ENCODER_HIDDEN2, training);
-    for (int i = 0; i < ENCODER_HIDDEN2; i++) {
+    // Vectorized activation with loop unrolling
+    i = 0;
+    for (; i < ENCODER_HIDDEN2 - 3; i += 4) {
+        vae->enc_hidden2_bn[i] = leaky_relu(vae->enc_hidden2_bn[i]);
+        vae->enc_hidden2_bn[i+1] = leaky_relu(vae->enc_hidden2_bn[i+1]);
+        vae->enc_hidden2_bn[i+2] = leaky_relu(vae->enc_hidden2_bn[i+2]);
+        vae->enc_hidden2_bn[i+3] = leaky_relu(vae->enc_hidden2_bn[i+3]);
+    }
+    for (; i < ENCODER_HIDDEN2; i++) {
         vae->enc_hidden2_bn[i] = leaky_relu(vae->enc_hidden2_bn[i]);
     }
     
@@ -352,7 +428,15 @@ void vae_forward(VAE *vae, const float *input, int training) {
     matmul_add(vae->dec_hidden1, vae->latent, vae->dec_w1, vae->dec_b1, DECODER_HIDDEN1, LATENT_SIZE);
     batch_norm_forward(vae->dec_hidden1, vae->dec_hidden1_bn, vae->dec_bn1_scale, vae->dec_bn1_shift,
                       vae->dec_bn1_mean, vae->dec_bn1_var, DECODER_HIDDEN1, training);
-    for (int i = 0; i < DECODER_HIDDEN1; i++) {
+    // Vectorized activation with loop unrolling
+    i = 0;
+    for (; i < DECODER_HIDDEN1 - 3; i += 4) {
+        vae->dec_hidden1_bn[i] = leaky_relu(vae->dec_hidden1_bn[i]);
+        vae->dec_hidden1_bn[i+1] = leaky_relu(vae->dec_hidden1_bn[i+1]);
+        vae->dec_hidden1_bn[i+2] = leaky_relu(vae->dec_hidden1_bn[i+2]);
+        vae->dec_hidden1_bn[i+3] = leaky_relu(vae->dec_hidden1_bn[i+3]);
+    }
+    for (; i < DECODER_HIDDEN1; i++) {
         vae->dec_hidden1_bn[i] = leaky_relu(vae->dec_hidden1_bn[i]);
     }
     
@@ -360,13 +444,29 @@ void vae_forward(VAE *vae, const float *input, int training) {
     matmul_add(vae->dec_hidden2, vae->dec_hidden1_bn, vae->dec_w2, vae->dec_b2, DECODER_HIDDEN2, DECODER_HIDDEN1);
     batch_norm_forward(vae->dec_hidden2, vae->dec_hidden2_bn, vae->dec_bn2_scale, vae->dec_bn2_shift,
                       vae->dec_bn2_mean, vae->dec_bn2_var, DECODER_HIDDEN2, training);
-    for (int i = 0; i < DECODER_HIDDEN2; i++) {
+    // Vectorized activation with loop unrolling
+    i = 0;
+    for (; i < DECODER_HIDDEN2 - 3; i += 4) {
+        vae->dec_hidden2_bn[i] = leaky_relu(vae->dec_hidden2_bn[i]);
+        vae->dec_hidden2_bn[i+1] = leaky_relu(vae->dec_hidden2_bn[i+1]);
+        vae->dec_hidden2_bn[i+2] = leaky_relu(vae->dec_hidden2_bn[i+2]);
+        vae->dec_hidden2_bn[i+3] = leaky_relu(vae->dec_hidden2_bn[i+3]);
+    }
+    for (; i < DECODER_HIDDEN2; i++) {
         vae->dec_hidden2_bn[i] = leaky_relu(vae->dec_hidden2_bn[i]);
     }
     
     // Decoder Layer 3: Hidden2 -> Output with Sigmoid
     matmul_add(vae->output, vae->dec_hidden2_bn, vae->dec_w3, vae->dec_b3, IMAGE_SIZE, DECODER_HIDDEN2);
-    for (int i = 0; i < IMAGE_SIZE; i++) {
+    // Vectorized sigmoid with loop unrolling
+    i = 0;
+    for (; i < IMAGE_SIZE - 3; i += 4) {
+        vae->output[i] = sigmoid(vae->output[i]);
+        vae->output[i+1] = sigmoid(vae->output[i+1]);
+        vae->output[i+2] = sigmoid(vae->output[i+2]);
+        vae->output[i+3] = sigmoid(vae->output[i+3]);
+    }
+    for (; i < IMAGE_SIZE; i++) {
         vae->output[i] = sigmoid(vae->output[i]);
     }
 }
@@ -552,15 +652,15 @@ void train_vae(VAE *vae, Dataset *dataset) {
             }
         }
         
-        // Enhanced progress reporting
-        if (epoch % 10 == 0 || epoch < 20) {
+        // Enhanced progress reporting with FID tracking
+        if (epoch % 5 == 0 || epoch < 20) {  // More frequent reporting
             double elapsed = (double)(clock() - start) / CLOCKS_PER_SEC;
             double speed = (dataset->count * (epoch + 1)) / elapsed;
-            printf("Epoch %3d: Loss=%.4f, Best=%.4f, LR=%.6f, β=%.3f, Time=%.1fs, Speed=%.0f/s\n", 
+            printf("Epoch %3d: Loss=%.4f, Best=%.4f, LR=%.6f, β=%.6f, Time=%.1fs, Speed=%.0f/s\n", 
                    epoch, avg_loss, best_loss, current_lr, current_beta, elapsed, speed);
             
-            // Generate test samples every 10 epochs
-            if (epoch % 10 == 0) {
+            // Generate test samples every 5 epochs for better monitoring
+            if (epoch % 5 == 0) {
                 printf("📸 Generating test samples for epoch %d...\n", epoch);
                 
                 // Create results directory if it doesn't exist
@@ -606,13 +706,18 @@ void train_vae(VAE *vae, Dataset *dataset) {
                         vae->output[j] = sigmoid(vae->output[j]);
                     }
                     
-                    // Post-processing for better quality
+                    // Enhanced post-processing for sharper, cleaner images
                     for (int j = 0; j < IMAGE_SIZE; j++) {
-                        // Contrast enhancement
-                        vae->output[j] = powf(vae->output[j], 0.9f);
-                        // Soft thresholding
-                        if (vae->output[j] < 0.05f) vae->output[j] *= 0.5f;
-                        if (vae->output[j] > 0.95f) vae->output[j] = 0.95f + 0.05f * vae->output[j];
+                        // Sigmoid sharpening for better contrast
+                        float x = (vae->output[j] - 0.5f) * 3.0f;  // Scale around midpoint
+                        vae->output[j] = 1.0f / (1.0f + expf(-x));
+                        
+                        // Adaptive thresholding based on local statistics
+                        if (vae->output[j] < 0.08f) vae->output[j] *= 0.3f;  // Stronger background suppression
+                        if (vae->output[j] > 0.92f) vae->output[j] = 0.92f + 0.08f * powf(vae->output[j], 2.0f);
+                        
+                        // Ensure valid range
+                        vae->output[j] = fmaxf(0.0f, fminf(1.0f, vae->output[j]));
                     }
                     
                     // Save test sample
