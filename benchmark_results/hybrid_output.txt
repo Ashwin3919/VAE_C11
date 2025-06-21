@@ -1,0 +1,20 @@
+Starting hybrid benchmark...
+time: OMP_NUM_THREADS=4: No such file or directory
+        0.00 real         0.00 user         0.00 sys
+              917504  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+                  67  page reclaims
+                   0  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                  15  voluntary context switches
+                   4  involuntary context switches
+             3928822  instructions retired
+             5307607  cycles elapsed
+              737728  peak memory footprint

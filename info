@@ -1,0 +1,20 @@
+# Build and test different modes
+make help                    # Show all options
+make info                    # Current configuration
+
+# Single builds
+make sequential             # No parallelization
+make openmp                # Multi-threaded
+make mpi                   # Multi-process
+make hybrid                # Full parallelization
+
+# Performance testing
+make test-sequential       # Build + run sequential
+make test-openmp          # Build + run OpenMP
+make test-mpi             # Build + run MPI (2 processes)
+make test-hybrid          # Build + run hybrid (2 processes)
+
+# Manual override
+make USE_MPI=1 USE_OPENMP=1  # Force hybrid mode
+
+OMP_NUM_THREADS=4 mpirun -np 2 ./vae_model
