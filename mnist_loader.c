@@ -17,7 +17,7 @@ uint32_t reverse_int(uint32_t i) {
     return ((uint32_t)c1 << 24) + ((uint32_t)c2 << 16) + ((uint32_t)c3 << 8) + c4;
 }
 
-// Load MNIST images and filter for digits 0 and 1
+// Load MNIST images - supports both binary (0,1) and full (0-9) modes
 int load_mnist_data(const char* image_file, const char* label_file, 
                    float*** images, int** labels, int* count) {
     
@@ -74,29 +74,41 @@ int load_mnist_data(const char* image_file, const char* label_file,
         return 0;
     }
     
-    // First pass: count images with labels 0 or 1
-    int binary_count = 0;
+    #ifdef FULL_MNIST_MODE
+    // Full MNIST mode: count all digits 0-9
+    int valid_count = 0;
+    for (uint32_t i = 0; i < num_images; i++) {
+        unsigned char label;
+        fread(&label, sizeof(unsigned char), 1, lbl_fp);
+        if (label >= 0 && label <= 9) {  // All digits 0-9
+            valid_count++;
+        }
+    }
+    printf("Found %d images with labels 0-9 (Full MNIST)\n", valid_count);
+    #else
+    // Binary mode: count only digits 0 and 1
+    int valid_count = 0;
     for (uint32_t i = 0; i < num_images; i++) {
         unsigned char label;
         fread(&label, sizeof(unsigned char), 1, lbl_fp);
         if (label == 0 || label == 1) {
-            binary_count++;
+            valid_count++;
         }
     }
-    
-    printf("Found %d images with labels 0 or 1\n", binary_count);
+    printf("Found %d images with labels 0 or 1 (Binary MNIST)\n", valid_count);
+    #endif
     
     // Allocate memory
-    *images = (float**)malloc(binary_count * sizeof(float*));
-    *labels = (int*)malloc(binary_count * sizeof(int));
-    *count = binary_count;
+    *images = (float**)malloc(valid_count * sizeof(float*));
+    *labels = (int*)malloc(valid_count * sizeof(int));
+    *count = valid_count;
     
     // Reset file pointers
     fseek(img_fp, 4 * sizeof(uint32_t), SEEK_SET);
     fseek(lbl_fp, 2 * sizeof(uint32_t), SEEK_SET);
     
-    // Second pass: load binary images
-    int binary_idx = 0;
+    // Second pass: load valid images
+    int valid_idx = 0;
     unsigned char* temp_image = (unsigned char*)malloc(784 * sizeof(unsigned char));
     
     for (uint32_t i = 0; i < num_images; i++) {
@@ -104,16 +116,22 @@ int load_mnist_data(const char* image_file, const char* label_file,
         fread(&label, sizeof(unsigned char), 1, lbl_fp);
         fread(temp_image, sizeof(unsigned char), 784, img_fp);
         
-        if (label == 0 || label == 1) {
-            (*images)[binary_idx] = (float*)malloc(784 * sizeof(float));
-            (*labels)[binary_idx] = (int)label;
+        #ifdef FULL_MNIST_MODE
+        int is_valid = (label >= 0 && label <= 9);  // All digits 0-9
+        #else
+        int is_valid = (label == 0 || label == 1);  // Only 0 and 1
+        #endif
+        
+        if (is_valid) {
+            (*images)[valid_idx] = (float*)malloc(784 * sizeof(float));
+            (*labels)[valid_idx] = (int)label;
             
             // Convert to float and normalize to [0, 1]
             for (int j = 0; j < 784; j++) {
-                (*images)[binary_idx][j] = (float)temp_image[j] / 255.0f;
+                (*images)[valid_idx][j] = (float)temp_image[j] / 255.0f;
             }
             
-            binary_idx++;
+            valid_idx++;
         }
     }
     
@@ -121,6 +139,10 @@ int load_mnist_data(const char* image_file, const char* label_file,
     fclose(img_fp);
     fclose(lbl_fp);
     
-    printf("Successfully loaded %d binary MNIST images\n", binary_count);
+    #ifdef FULL_MNIST_MODE
+    printf("Successfully loaded %d full MNIST images (0-9)\n", valid_count);
+    #else
+    printf("Successfully loaded %d binary MNIST images (0-1)\n", valid_count);
+    #endif
     return 1;
 } 

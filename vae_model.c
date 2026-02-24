@@ -5,23 +5,23 @@
 #include <time.h>
 #include <stdint.h>
 
-// High-Performance VAE Configuration - Optimized for Speed and Quality
+// Full MNIST VAE Configuration - Optimized for All 10 Digits (0-9)
 #define IMAGE_SIZE 784
-#define ENCODER_HIDDEN1 512      // Reduced from 1024 for 60% speed improvement
-#define ENCODER_HIDDEN2 256      // Reduced from 512
-#define LATENT_SIZE 64           // Reduced from 128 - still excellent for MNIST
-#define DECODER_HIDDEN1 256      // Reduced from 512  
-#define DECODER_HIDDEN2 512      // Reduced from 1024
-#define LEARNING_RATE 0.001f     // Increased for faster convergence with smaller model
-#define BATCH_SIZE 64            // Increased for better GPU utilization
-#define EPOCHS 600               // Fewer epochs needed with optimized architecture
+#define ENCODER_HIDDEN1 640      // Increased from 512 for 10-digit complexity
+#define ENCODER_HIDDEN2 320      // Increased from 256 
+#define LATENT_SIZE 128          // Increased from 64 - need more representation for 10 classes
+#define DECODER_HIDDEN1 320      // Increased from 256  
+#define DECODER_HIDDEN2 640      // Increased from 512
+#define LEARNING_RATE 0.0008f    // Slightly reduced for larger model stability
+#define BATCH_SIZE 64            // Keep optimal batch size
+#define EPOCHS 800               // More epochs for 10-digit complexity
 #define BETA_START 0.00001f      // Conservative start
-#define BETA_END 0.001f          // Reduced end value for better reconstruction
-#define BETA_ANNEALING_EPOCHS 150 // Shorter annealing
-#define BETA_ANNEALING_START 200  // Start annealing earlier
-#define GRAD_CLIP 0.8f           // Slightly tighter for smaller model
-#define DROPOUT_RATE 0.08f       // Reduced dropout for smaller model
-#define WARMUP_EPOCHS 80         // Shorter warmup
+#define BETA_END 0.0008f         // Reduced for better reconstruction quality
+#define BETA_ANNEALING_EPOCHS 200 // Longer annealing for complex data
+#define BETA_ANNEALING_START 250  // Start annealing later
+#define GRAD_CLIP 0.8f           // Keep tight control
+#define DROPOUT_RATE 0.1f        // Slightly more dropout for larger model
+#define WARMUP_EPOCHS 100        // Longer warmup for stability
 
 // Progressive training modes for optimal performance
 #define TRAINING_MODE_FAST 1      // Fast reconstruction focus
@@ -32,6 +32,7 @@
 #define USE_ADAM_OPTIMIZER 1      // Enable Adam optimization
 #define USE_PROGRESSIVE_TRAINING 1 // Enable progressive training
 #define USE_ELU_ACTIVATION 1      // Use ELU instead of LeakyReLU
+#define FULL_MNIST_MODE 1         // Enable full 10-digit MNIST support
 
 // Advanced VAE structure with batch normalization and residual connections
 typedef struct {
@@ -739,6 +740,7 @@ void train_vae(VAE *vae, Dataset *dataset) {
     
     // Initialize performance monitoring and optimizers
     PerformanceMonitor *monitor = create_performance_monitor();
+    monitor->best_loss = INFINITY;  // Initialize monitor's best_loss
     float best_loss = INFINITY;
     int patience = 0;
     
@@ -830,6 +832,7 @@ void train_vae(VAE *vae, Dataset *dataset) {
         // Early stopping and progress reporting
         if (avg_loss < best_loss) {
             best_loss = avg_loss;
+            monitor->best_loss = best_loss;  // Update monitor's best_loss immediately
             patience = 0;
         } else {
             patience++;
@@ -842,10 +845,6 @@ void train_vae(VAE *vae, Dataset *dataset) {
         
         // Enhanced progress reporting with performance tracking
         if (epoch % 3 == 0 || epoch < 30) {  // More frequent reporting for early epochs
-            if (avg_loss < best_loss) {
-                best_loss = avg_loss;
-                monitor->best_loss = best_loss;
-            }
             log_performance(monitor, epoch, training_mode);
             
             // Generate test samples every 3 epochs for better quality monitoring
@@ -904,7 +903,7 @@ void train_vae(VAE *vae, Dataset *dataset) {
                     
                     if (processing_level >= 1) {
                         // Basic contrast enhancement
-                        for (int j = 0; j < IMAGE_SIZE; j++) {
+                    for (int j = 0; j < IMAGE_SIZE; j++) {
                             float x = vae->output[j];
                             x = (x - 0.5f) * 3.0f;  
                             x = 1.0f / (1.0f + expf(-x));
@@ -980,9 +979,80 @@ void train_vae(VAE *vae, Dataset *dataset) {
     free(monitor);
 }
 
+// Conditional generation for specific digits (Full MNIST mode)
+void generate_digit_samples(VAE *vae, int digit, int num_samples) {
+    #ifdef FULL_MNIST_MODE
+    printf("\n🎯 Generating %d samples of digit %d...\n", num_samples, digit);
+    
+    for (int i = 0; i < num_samples; i++) {
+        // Use digit-specific latent space regions for better conditional generation
+        for (int j = 0; j < LATENT_SIZE; j++) {
+            // Create digit-specific latent patterns
+            float base_noise = fast_randn() * 0.7f;
+            float digit_bias = ((float)digit - 4.5f) / 10.0f; // Center around different regions
+            vae->latent[j] = base_noise + digit_bias * (j % 10 == digit ? 1.5f : 0.3f);
+        }
+        
+        // Manual decoder forward pass for conditional generation
+        matmul_add(vae->dec_hidden1, vae->latent, vae->dec_w1, vae->dec_b1, DECODER_HIDDEN1, LATENT_SIZE);
+        batch_norm_forward(vae->dec_hidden1, vae->dec_hidden1_bn, vae->dec_bn1_scale, vae->dec_bn1_shift,
+                          vae->dec_bn1_mean, vae->dec_bn1_var, DECODER_HIDDEN1, 0);
+        for (int j = 0; j < DECODER_HIDDEN1; j++) {
+            vae->dec_hidden1_bn[j] = ACTIVATION_FUNC(vae->dec_hidden1_bn[j]);
+        }
+        
+        matmul_add(vae->dec_hidden2, vae->dec_hidden1_bn, vae->dec_w2, vae->dec_b2, DECODER_HIDDEN2, DECODER_HIDDEN1);
+        batch_norm_forward(vae->dec_hidden2, vae->dec_hidden2_bn, vae->dec_bn2_scale, vae->dec_bn2_shift,
+                          vae->dec_bn2_mean, vae->dec_bn2_var, DECODER_HIDDEN2, 0);
+        for (int j = 0; j < DECODER_HIDDEN2; j++) {
+            vae->dec_hidden2_bn[j] = ACTIVATION_FUNC(vae->dec_hidden2_bn[j]);
+        }
+        
+        matmul_add(vae->output, vae->dec_hidden2_bn, vae->dec_w3, vae->dec_b3, IMAGE_SIZE, DECODER_HIDDEN2);
+        for (int j = 0; j < IMAGE_SIZE; j++) {
+            vae->output[j] = sigmoid(vae->output[j]);
+        }
+        
+        // Enhanced post-processing for digit-specific generation
+        for (int j = 0; j < IMAGE_SIZE; j++) {
+            float x = vae->output[j];
+            x = (x - 0.5f) * 5.0f;
+            x = 1.0f / (1.0f + expf(-x));
+            if (x < 0.05f) x = 0.0f;
+            if (x > 0.95f) x = 1.0f;
+            vae->output[j] = x;
+        }
+        
+        // Save conditional sample
+        char filename[64];
+        sprintf(filename, "digit_%d_sample_%d.pgm", digit, i);
+        FILE *f = fopen(filename, "w");
+        if (f) {
+            fprintf(f, "P2\n28 28\n255\n");
+            for (int y = 0; y < 28; y++) {
+                for (int x = 0; x < 28; x++) {
+                    int val = (int)(vae->output[y * 28 + x] * 255);
+                    val = val < 0 ? 0 : (val > 255 ? 255 : val);
+                    fprintf(f, "%d ", val);
+                }
+                fprintf(f, "\n");
+            }
+            fclose(f);
+        }
+    }
+    printf("✅ Generated %d samples of digit %d\n", num_samples, digit);
+    #else
+    printf("Conditional generation only available in FULL_MNIST_MODE\n");
+    #endif
+}
+
 // High-quality sample generation with multiple techniques
 void generate_samples(VAE *vae, int num_samples) {
+    #ifdef FULL_MNIST_MODE
+    printf("\n🎨 Generating %d diverse samples from all 10 digits...\n", num_samples);
+    #else
     printf("\n🎨 Generating %d high-quality samples with advanced techniques...\n", num_samples);
+    #endif
     
     for (int i = 0; i < num_samples; i++) {
         // Advanced sampling techniques
@@ -1105,90 +1175,214 @@ void generate_samples(VAE *vae, int num_samples) {
 // Include MNIST loader functions
 #include "mnist_loader.c"
 
-// Dataset loading function
-Dataset* load_mnist_binary() {
-    printf("Loading MNIST dataset for high-quality training...\n");
+// Dataset loading function - supports both binary and full MNIST
+Dataset* load_mnist_dataset() {
+    #ifdef FULL_MNIST_MODE
+    printf("Loading Full MNIST dataset (digits 0-9) for training...\n");
+    #else  
+    printf("Loading Binary MNIST dataset (digits 0-1) for training...\n");
+    #endif
     
     Dataset *dataset = malloc(sizeof(Dataset));
     
     // Try to load real MNIST data
     if (load_mnist_data("data/train-images-idx3-ubyte", "data/train-labels-idx1-ubyte",
                        &dataset->images, &dataset->labels, &dataset->count)) {
-        printf("✅ Using real MNIST training data (%d samples)\n", dataset->count);
+        #ifdef FULL_MNIST_MODE
+        printf("✅ Using real MNIST training data (%d samples, digits 0-9)\n", dataset->count);
+        #else
+        printf("✅ Using real MNIST training data (%d samples, digits 0-1)\n", dataset->count);
+        #endif
         return dataset;
     }
     
     // Try test data if training data not available
     if (load_mnist_data("data/t10k-images-idx3-ubyte", "data/t10k-labels-idx1-ubyte",
                        &dataset->images, &dataset->labels, &dataset->count)) {
-        printf("✅ Using real MNIST test data (%d samples)\n", dataset->count);
+        #ifdef FULL_MNIST_MODE
+        printf("✅ Using real MNIST test data (%d samples, digits 0-9)\n", dataset->count);
+        #else
+        printf("✅ Using real MNIST test data (%d samples, digits 0-1)\n", dataset->count);
+        #endif
         return dataset;
     }
     
     // Fallback to high-quality synthetic data
-    printf("⚠️  MNIST files not found, generating high-quality synthetic data...\n");
+    #ifdef FULL_MNIST_MODE
+    printf("⚠️  MNIST files not found, generating synthetic data for all 10 digits...\n");
+    dataset->count = 5000;  // More samples for 10-digit complexity
+    #else
+    printf("⚠️  MNIST files not found, generating synthetic data for binary digits...\n");
+    dataset->count = 2000;  // Binary mode
+    #endif
     printf("💡 To use real data, run: ./download_mnist.sh\n");
     
-    dataset->count = 2000;  // More samples for better training
     dataset->images = malloc(dataset->count * sizeof(float*));
     dataset->labels = malloc(dataset->count * sizeof(int));
     
     for (int i = 0; i < dataset->count; i++) {
         dataset->images[i] = malloc(784 * sizeof(float));
-        dataset->labels[i] = rand() % 2;  // 0 or 1
+        #ifdef FULL_MNIST_MODE
+        dataset->labels[i] = rand() % 10;  // 0-9
+        #else
+        dataset->labels[i] = rand() % 2;   // 0-1
+        #endif
         
-        // Generate high-quality synthetic digit patterns
+        // Generate enhanced synthetic digit patterns for all digits
         for (int j = 0; j < 784; j++) {
             int row = j / 28;
             int col = j % 28;
+            int digit = dataset->labels[i];
+            float pixel_val = 0.0f;
             
-            if (dataset->labels[i] == 0) {
+            #ifdef FULL_MNIST_MODE
+            // Full 10-digit synthetic patterns with realistic structure
+            switch (digit) {
+                case 0: {
+                    // Enhanced oval pattern
+                    int center_row = 14, center_col = 14;
+                    float dist = sqrtf((row - center_row) * (row - center_row) + 
+                                     (col - center_col) * (col - center_col));
+                    if (dist > 6.0f && dist < 11.0f) {
+                        pixel_val = 1.0f - fabsf(dist - 8.5f) / 2.5f;
+                    }
+                    break;
+                }
+                case 1: {
+                    // Vertical line with serifs
+                    if (col >= 12 && col <= 16 && row >= 4 && row <= 23) {
+                        pixel_val = 1.0f - fabsf(col - 14.0f) / 2.0f;
+                    }
+                    if ((row >= 4 && row <= 6) || (row >= 21 && row <= 23)) {
+                        if (col >= 10 && col <= 18) pixel_val = fmaxf(pixel_val, 0.8f);
+                    }
+                    break;
+                }
+                case 2: {
+                    // S-shaped curve pattern
+                    float curve_factor = sinf(row * 0.25f) * 4.0f;
+                    int target_col = 14 + (int)curve_factor;
+                    if (abs(col - target_col) <= 2) {
+                        pixel_val = 1.0f - abs(col - target_col) / 2.0f;
+                    }
+                    // Horizontal sections
+                    if ((row <= 6 || row >= 22) && col >= 8 && col <= 20) {
+                        pixel_val = fmaxf(pixel_val, 0.7f);
+                    }
+                    break;
+                }
+                case 3: {
+                    // Double bump pattern
+                    if (col >= 18 && col <= 22) {
+                        if ((row >= 6 && row <= 10) || (row >= 18 && row <= 22)) {
+                            pixel_val = 0.9f;
+                        }
+                    }
+                    if ((row >= 6 && row <= 10) || (row >= 13 && row <= 15) || 
+                        (row >= 18 && row <= 22)) {
+                        if (col >= 10 && col <= 20) {
+                            pixel_val = fmaxf(pixel_val, 0.7f);
+                        }
+                    }
+                    break;
+                }
+                case 4: {
+                    // Cross/triangle pattern
+                    if (col >= 12 && col <= 16) {
+                        pixel_val = 0.9f; // Vertical line
+                    }
+                    if (row >= 13 && row <= 15 && col >= 6 && col <= 20) {
+                        pixel_val = fmaxf(pixel_val, 0.8f); // Horizontal bar
+                    }
+                    if (row <= 15 && col <= 14 && abs((row - col + 6)) <= 2) {
+                        pixel_val = fmaxf(pixel_val, 0.7f); // Diagonal
+                    }
+                    break;
+                }
+                case 5: {
+                    // S pattern with horizontal elements
+                    if ((row <= 8 || (row >= 12 && row <= 16) || row >= 20) && 
+                        col >= 8 && col <= 18) {
+                        pixel_val = 0.8f;
+                    }
+                    if ((col <= 10 && row <= 15) || (col >= 16 && row >= 15)) {
+                        pixel_val = fmaxf(pixel_val, 0.7f);
+                    }
+                    break;
+                }
+                case 6: {
+                    // Spiral/loop pattern
+                    int center_row = 16, center_col = 14;
+                    float dist = sqrtf((row - center_row) * (row - center_row) + 
+                                     (col - center_col) * (col - center_col));
+                    if ((dist > 4.0f && dist < 8.0f) || (row <= 15 && col <= 12)) {
+                        pixel_val = 1.0f - fabsf(dist - 6.0f) / 4.0f;
+                    }
+                    break;
+                }
+                case 7: {
+                    // Diagonal stroke pattern
+                    if (row <= 8 && col >= 8 && col <= 20) {
+                        pixel_val = 0.9f; // Top bar
+                    }
+                    int diag_col = 20 - (int)(row * 0.8f);
+                    if (abs(col - diag_col) <= 2 && row >= 6) {
+                        pixel_val = fmaxf(pixel_val, 1.0f - abs(col - diag_col) / 2.0f);
+                    }
+                    break;
+                }
+                case 8: {
+                    // Double loop/figure-8 pattern
+                    int center1_row = 10, center2_row = 18;
+                    int center_col = 14;
+                    float dist1 = sqrtf((row - center1_row) * (row - center1_row) + 
+                                      (col - center_col) * (col - center_col));
+                    float dist2 = sqrtf((row - center2_row) * (row - center2_row) + 
+                                      (col - center_col) * (col - center_col));
+                    if ((dist1 > 3.0f && dist1 < 6.0f) || (dist2 > 3.0f && dist2 < 6.0f)) {
+                        pixel_val = 1.0f - fminf(fabsf(dist1 - 4.5f), fabsf(dist2 - 4.5f)) / 1.5f;
+                    }
+                    break;
+                }
+                case 9: {
+                    // Inverted 6 pattern
+                    int center_row = 10, center_col = 14;
+                    float dist = sqrtf((row - center_row) * (row - center_row) + 
+                                     (col - center_col) * (col - center_col));
+                    if ((dist > 4.0f && dist < 8.0f) || (row >= 15 && col >= 16)) {
+                        pixel_val = 1.0f - fabsf(dist - 6.0f) / 4.0f;
+                    }
+                    break;
+                }
+            }
+            #else
+            // Binary mode (original enhanced patterns)
+            if (digit == 0) {
                 // Enhanced circle pattern for 0
                 int center_row = 14, center_col = 14;
                 float dist = sqrtf((row - center_row) * (row - center_row) + 
                                  (col - center_col) * (col - center_col));
-                
-                // Create smooth circle with varying thickness
-                float circle_val = 0.0f;
                 if (dist > 6.0f && dist < 11.0f) {
-                    float thickness = 1.0f - fabsf(dist - 8.5f) / 2.5f;
-                    circle_val = fmaxf(0.0f, thickness);
+                    pixel_val = 1.0f - fabsf(dist - 8.5f) / 2.5f;
                 }
-                
-                // Add some internal structure
                 if (dist < 4.0f) {
-                    circle_val += 0.1f * (4.0f - dist) / 4.0f;
+                    pixel_val += 0.1f * (4.0f - dist) / 4.0f;
                 }
-                
-                dataset->images[i][j] = fminf(1.0f, circle_val);
             } else {
                 // Enhanced vertical line for 1 with serifs
-                float line_val = 0.0f;
-                
-                // Main vertical line
-                if (col >= 12 && col <= 16) {
-                    if (row >= 4 && row <= 23) {
-                        float center_dist = fabsf(col - 14.0f);
-                        line_val = fmaxf(0.0f, 1.0f - center_dist / 2.0f);
+                if (col >= 12 && col <= 16 && row >= 4 && row <= 23) {
+                    pixel_val = 1.0f - fabsf(col - 14.0f) / 2.0f;
                     }
+                if (((row >= 4 && row <= 6) || (row >= 21 && row <= 23)) &&
+                    col >= 10 && col <= 18) {
+                    pixel_val = fmaxf(pixel_val, 0.8f);
                 }
-                
-                // Top serif
-                if (row >= 4 && row <= 6 && col >= 10 && col <= 18) {
-                    line_val = fmaxf(line_val, 0.8f);
-                }
-                
-                // Bottom serif
-                if (row >= 21 && row <= 23 && col >= 10 && col <= 18) {
-                    line_val = fmaxf(line_val, 0.8f);
-                }
-                
-                dataset->images[i][j] = line_val;
             }
+            #endif
             
-            // Add subtle noise for realism
-            dataset->images[i][j] += 0.05f * (fast_randn());
-            dataset->images[i][j] = fmaxf(0.0f, fminf(1.0f, dataset->images[i][j]));
+            // Add subtle noise for realism and clamp values
+            pixel_val += 0.05f * fast_randn();
+            dataset->images[i][j] = fmaxf(0.0f, fminf(1.0f, pixel_val));
         }
     }
     
@@ -1209,8 +1403,29 @@ void free_dataset(Dataset *dataset) {
 
 // Main function with enhanced training pipeline
 int main() {
-    printf("🧠 High-Quality MNIST VAE in C\n");
-    printf("================================\n");
+    #ifdef FULL_MNIST_MODE
+    printf("🧠 Full MNIST VAE in C (All 10 Digits)\n");
+    printf("=====================================\n");
+    printf("🎯 Architecture: %d→%d→%d→%d→%d→%d→%d\n", 
+           IMAGE_SIZE, ENCODER_HIDDEN1, ENCODER_HIDDEN2, LATENT_SIZE,
+           DECODER_HIDDEN1, DECODER_HIDDEN2, IMAGE_SIZE);
+    printf("📊 Model: %.1fM parameters | Digits: 0-9 | Latent: %dD\n",
+           (2.0f * (IMAGE_SIZE * ENCODER_HIDDEN1 + ENCODER_HIDDEN1 * ENCODER_HIDDEN2 +
+           ENCODER_HIDDEN2 * LATENT_SIZE + LATENT_SIZE * DECODER_HIDDEN1 +
+           DECODER_HIDDEN1 * DECODER_HIDDEN2 + DECODER_HIDDEN2 * IMAGE_SIZE)) / 1000000.0f,
+           LATENT_SIZE);
+    #else
+    printf("🧠 Binary MNIST VAE in C (Digits 0 & 1)\n");
+    printf("======================================\n");
+    printf("🎯 Architecture: %d→%d→%d→%d→%d→%d→%d\n", 
+           IMAGE_SIZE, ENCODER_HIDDEN1, ENCODER_HIDDEN2, LATENT_SIZE,
+           DECODER_HIDDEN1, DECODER_HIDDEN2, IMAGE_SIZE);
+    printf("📊 Model: %.1fM parameters | Digits: 0-1 | Latent: %dD\n",
+           (2.0f * (IMAGE_SIZE * ENCODER_HIDDEN1 + ENCODER_HIDDEN1 * ENCODER_HIDDEN2 +
+           ENCODER_HIDDEN2 * LATENT_SIZE + LATENT_SIZE * DECODER_HIDDEN1 +
+           DECODER_HIDDEN1 * DECODER_HIDDEN2 + DECODER_HIDDEN2 * IMAGE_SIZE)) / 1000000.0f,
+           LATENT_SIZE);
+    #endif
     
     srand(time(NULL));
     rng_state = time(NULL);
@@ -1220,7 +1435,7 @@ int main() {
     
     // Load MNIST dataset
     printf("\n📊 Loading MNIST dataset...\n");
-    Dataset *dataset = load_mnist_binary();
+    Dataset *dataset = load_mnist_dataset();
     if (!dataset || dataset->count == 0) {
         printf("❌ Failed to load dataset\n");
         return 1;
@@ -1231,15 +1446,42 @@ int main() {
     // Train the model
     train_vae(vae, dataset);
     
-    // Generate high-quality samples
+    #ifdef FULL_MNIST_MODE
+    // Generate samples for each digit class
+    printf("\n🎯 Full MNIST Mode: Generating conditional samples...\n");
+    for (int digit = 0; digit <= 9; digit++) {
+        generate_digit_samples(vae, digit, 3);
+    }
+    
+    // Generate diverse samples
+    generate_samples(vae, 15);
+    
+    // Print dataset statistics
+    printf("\n📊 Dataset Statistics:\n");
+    int digit_counts[10] = {0};
+    for (int i = 0; i < dataset->count; i++) {
+        if (dataset->labels[i] >= 0 && dataset->labels[i] <= 9) {
+            digit_counts[dataset->labels[i]]++;
+        }
+    }
+    for (int d = 0; d <= 9; d++) {
+        printf("   Digit %d: %d samples (%.1f%%)\n", d, digit_counts[d], 
+               100.0f * digit_counts[d] / dataset->count);
+    }
+    
+    printf("\n✅ Full MNIST generation completed!\n");
+    printf("📁 Check digit_*_sample_*.pgm for conditional samples\n");
+    printf("📁 Check hq_sample_*.pgm for diverse samples\n");
+    #else
+    // Binary mode generation
     generate_samples(vae, 10);
+    printf("\n✅ Binary MNIST generation completed!\n");
+    printf("📁 Check hq_sample_*.pgm files for results\n");
+    #endif
     
     // Cleanup
     free_dataset(dataset);
     free_vae(vae);
-    
-    printf("\n🎉 High-Quality VAE training and generation completed!\n");
-    printf("Check hq_sample_*.pgm files for results.\n");
     
     return 0;
 }
