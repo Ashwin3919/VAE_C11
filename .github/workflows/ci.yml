@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  test:
+    name: Build & Test (Ubuntu)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y gcc libgomp1
+
+      - name: Run test suite
+        run: make test LIBOMP_CFLAGS=-fopenmp LIBOMP_LIBS=-lgomp
+
+      - name: Build ThreadSanitizer binary
+        run: make tsan LIBOMP_CFLAGS=-fopenmp LIBOMP_LIBS=-lgomp
+
+      - name: Run TSan with OMP_NUM_THREADS=2
+        # Single-threaded tests don't exercise the #pragma omp parallel for path
+        # in linear_batch.  Setting OMP_NUM_THREADS=2 forces the runtime to spin
+        # up a second thread for every forward pass, making TSan detect any write-
+        # write or read-write races that exist across sample rows.
+        # The test binary itself is deterministic; TSan adds ~10x overhead but the
+        # suite is small enough to complete in <60 s.
+        run: OMP_NUM_THREADS=2 ./exe/run_tests_tsan

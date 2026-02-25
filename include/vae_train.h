@@ -14,11 +14,15 @@ typedef struct {
 
 /*
  * load_dataset — load MNIST from cfg->data_dir.
- *   Respects cfg->full_mnist: 0 = digits 0-1 only; 1 = all 10 digits.
+ *
+ *   allowed_digits : array of digit values to keep (e.g. {0,1}), or NULL
+ *   n_allowed      : length of allowed_digits; 0 = load all 10 digits
+ *
  *   Returns a heap-allocated Dataset on success, NULL on I/O error or OOM.
  *   Caller must release with free_dataset().
  */
-Dataset *load_dataset(const VAEConfig *cfg);
+Dataset *load_dataset(const VAEConfig *cfg, const int *allowed_digits,
+                      int n_allowed);
 
 /*
  * free_dataset — release all memory owned by ds.

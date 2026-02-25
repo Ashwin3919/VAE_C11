@@ -27,11 +27,18 @@ TIFLAGS = -I$(INC) -I$(TESTS)
 HEADERS = $(wildcard $(INC)/*.h)
 
 # ── core implementation files (shared by all binary targets and tests) ─
+# vae_model.c  : slab lifecycle only (create_vae / free_vae)
+# vae_forward.c: encoder + decoder forward pass
+# vae_backward.c: gradient accumulation
+# vae_loss.c   : ELBO loss + Adam update + vae_decode
 CORE_SRCS = \
     $(SRC)/config/vae_config.c       \
     $(SRC)/rng/vae_rng.c             \
     $(SRC)/optimizer/vae_optimizer.c \
     $(SRC)/core/vae_model.c          \
+    $(SRC)/core/vae_forward.c        \
+    $(SRC)/core/vae_backward.c       \
+    $(SRC)/core/vae_loss.c           \
     $(SRC)/io/vae_io.c               \
     $(SRC)/generate/vae_generate.c   \
     $(SRC)/train/vae_train.c         \
@@ -53,9 +60,10 @@ v2 mid: $(MAIN_SRC) $(CORE_SRCS) $(HEADERS)
 	    $(MAIN_SRC) $(CORE_SRCS) $(LIBS)
 
 # ── v3: large model, full MNIST (0-9) ─────────────────────────────────
+# Note: -DFULL_MNIST removed; digit mode is now a runtime flag (--full-mnist)
 full: $(MAIN_SRC) $(CORE_SRCS) $(HEADERS)
 	@mkdir -p $(EXE_DIR)
-	$(CC) $(CFLAGS) $(IFLAGS) -DVERSION_V3 -DFULL_MNIST \
+	$(CC) $(CFLAGS) $(IFLAGS) -DVERSION_V3 \
 	    -o $(EXE_DIR)/vae_model $(MAIN_SRC) $(CORE_SRCS) $(LIBS)
 
 # ── debug build ────────────────────────────────────────────────────────
@@ -89,7 +97,7 @@ omp-mid: $(MAIN_SRC) $(CORE_SRCS) $(HEADERS)
 
 omp-full: $(MAIN_SRC) $(CORE_SRCS) $(HEADERS)
 	@mkdir -p $(EXE_DIR)
-	$(CC) $(CFLAGS) $(IFLAGS) $(LIBOMP_CFLAGS) -DVERSION_V3 -DFULL_MNIST \
+	$(CC) $(CFLAGS) $(IFLAGS) $(LIBOMP_CFLAGS) -DVERSION_V3 \
 	    -o $(EXE_DIR)/vae_model_omp_full $(MAIN_SRC) $(CORE_SRCS) $(LIBS) $(LIBOMP_LIBS)
 
 # Convenience alias — builds all three OMP variants at once.
@@ -100,9 +108,7 @@ $(EXE_DIR)/view_results: $(SRC)/view_results.c
 	@mkdir -p $(EXE_DIR)
 	$(CC) $(CFLAGS) -o $@ $^
 
-# ── unit + integration tests (no MNIST required) ──────────────────────
-# $(HEADERS) is listed as a prerequisite so that any public header change
-# triggers a full test recompile, just as it does for the main binaries.
+# ── test sources (shared between test and tsan targets) ───────────────
 TEST_SRCS = \
     $(TESTS)/run_tests.c             \
     $(TESTS)/test_rng.c              \
@@ -113,17 +119,33 @@ TEST_SRCS = \
     $(SRC)/rng/vae_rng.c             \
     $(SRC)/optimizer/vae_optimizer.c \
     $(SRC)/core/vae_model.c          \
+    $(SRC)/core/vae_forward.c        \
+    $(SRC)/core/vae_backward.c       \
+    $(SRC)/core/vae_loss.c           \
     $(SRC)/io/vae_io.c               \
     $(SRC)/generate/vae_generate.c   \
     $(SRC)/mnist_loader.c
 
+# ── unit + integration tests (no MNIST required) ──────────────────────
+# $(HEADERS) is listed as a prerequisite so that any public header change
+# triggers a full test recompile, just as it does for the main binaries.
 test: $(TEST_SRCS) $(HEADERS)
 	@mkdir -p $(EXE_DIR)
 	$(CC) $(CFLAGS) $(TIFLAGS) -o $(EXE_DIR)/run_tests $(TEST_SRCS) $(LIBS)
 	./$(EXE_DIR)/run_tests
 
+# ── ThreadSanitizer — validate OMP paths for data races ───────────────
+# Run on Linux with gcc; on macOS clang TSan is also supported.
+# Catches races in: linear_batch parallel for, rng_normal concurrent calls.
+tsan: $(TEST_SRCS) $(HEADERS)
+	@mkdir -p $(EXE_DIR)
+	$(CC) -g -O1 -std=c11 -fsanitize=thread \
+	    -fno-omit-frame-pointer $(TIFLAGS) \
+	    -o $(EXE_DIR)/run_tests_tsan $(TEST_SRCS) $(LIBS)
+	./$(EXE_DIR)/run_tests_tsan
+
 # ── clean ──────────────────────────────────────────────────────────────
 clean:
 	rm -rf $(EXE_DIR) *.o *.pgm
 
-.PHONY: all v2 mid full debug asan omp omp-mini omp-mid omp-full test clean
+.PHONY: all v2 mid full debug asan omp omp-mini omp-mid omp-full test tsan clean

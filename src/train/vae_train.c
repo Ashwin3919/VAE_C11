@@ -18,19 +18,18 @@
 /* Dataset                                                              */
 /* ------------------------------------------------------------------ */
 
-Dataset *load_dataset(const VAEConfig *cfg) {
+Dataset *load_dataset(const VAEConfig *cfg, const int *allowed_digits,
+                      int n_allowed) {
   Dataset *ds = malloc(sizeof(Dataset));
   if (!ds)
     return NULL;
-  printf("[INFO] loading %s MNIST...\n",
-         cfg->full_mnist ? "full (0-9)" : "binary (0-1)");
   char train_img[PATH_BUF_SIZE], train_lbl[PATH_BUF_SIZE];
   snprintf(train_img, sizeof train_img, "%s/train-images-idx3-ubyte",
            cfg->data_dir);
   snprintf(train_lbl, sizeof train_lbl, "%s/train-labels-idx1-ubyte",
            cfg->data_dir);
   if (load_mnist_data(train_img, train_lbl, &ds->images, &ds->labels,
-                      &ds->count)) {
+                      &ds->count, allowed_digits, n_allowed)) {
     printf("[INFO] loaded %d images\n", ds->count);
     return ds;
   }
