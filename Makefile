@@ -67,6 +67,15 @@ asan: $(MAIN_SRC) $(CORE_SRCS) $(HEADERS)
 	    -fno-omit-frame-pointer $(IFLAGS) \
 	    -o $(EXE_DIR)/vae_model_asan $(MAIN_SRC) $(CORE_SRCS) $(LIBS)
 
+# ── OpenMP build — activates the #pragma omp parallel for in linear_batch
+# Uses a separate output binary so the default build stays dependency-free.
+# Requires GCC/Clang with -fopenmp support (brew install libomp on macOS).
+# Run with:  make omp && ./exe/vae_model_omp
+omp: $(MAIN_SRC) $(CORE_SRCS) $(HEADERS)
+	@mkdir -p $(EXE_DIR)
+	$(CC) $(CFLAGS) $(IFLAGS) -fopenmp \
+	    -o $(EXE_DIR)/vae_model_omp $(MAIN_SRC) $(CORE_SRCS) $(LIBS)
+
 # ── results viewer (standalone, no VAE dependency) ────────────────────
 $(EXE_DIR)/view_results: $(SRC)/view_results.c
 	@mkdir -p $(EXE_DIR)
@@ -98,4 +107,4 @@ test: $(TEST_SRCS) $(HEADERS)
 clean:
 	rm -rf $(EXE_DIR) *.o *.pgm
 
-.PHONY: all v2 mid full debug asan test clean
+.PHONY: all v2 mid full debug asan omp test clean
