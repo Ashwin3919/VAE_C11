@@ -7,6 +7,13 @@
 #ifndef VAE_CONFIG_H
 #define VAE_CONFIG_H
 
+/*
+ * PATH_BUF_SIZE: maximum filesystem path length for checkpoint/result files.
+ * Placed here (not vae_math.h) because it is a configuration/IO constant,
+ * not a numeric or activation-function constant.
+ */
+#define PATH_BUF_SIZE 512
+
 typedef struct {
   /* Architecture */
   int h1, h2, latent, num_classes;
@@ -22,11 +29,11 @@ typedef struct {
   int lr_warmup_epochs; /* linear LR ramp: 0→lr over this many epochs       */
   int es_patience;      /* early stopping: max epochs without val improvement */
   int es_min_epoch;     /* early stopping: never stop before this epoch       */
-  int full_mnist; /* 1 = load all 10 digits, 0 = digits 0-1 only */
+  int full_mnist;       /* 1 = load all 10 digits, 0 = digits 0-1 only */
 
   /* Paths */
   const char *version_tag;
-  const char *data_dir;   /* root directory for MNIST binary files */
+  const char *data_dir; /* root directory for MNIST binary files */
   const char *result_dir;
   const char *model_file;
   const char *model_dir;

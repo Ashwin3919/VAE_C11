@@ -32,47 +32,128 @@
  */
 #define SLAB_ALIGN 32
 
-/* Forward declarations for helpers defined in vae_forward.c */
-void he_init(float *w, int fan_in, int fan_out, Rng *rng);
+#include "vae_internal.h" /* he_init */
 
 /* ------------------------------------------------------------------ */
-/* Slab layout helper                                                   */
+/* Slab layout — two-pass NEXT macro                                    */
 /* ------------------------------------------------------------------ */
 
 /*
- * slab_size — total number of floats required for the VAE slab.
- * Must stay in sync with the NEXT() calls in create_vae().
- * A runtime guard in create_vae() catches any mismatch.
+ * Two-pass slab layout.
+ *
+ * Problem: the original slab_size() duplicated all 40+ NEXT() sizes as
+ * separate arithmetic.  One is the source of truth; one drifts.  The
+ * runtime guard catches it — but only at runtime, after a crash.
+ *
+ * Solution: a single ALLOC_BLOCK() macro list is evaluated twice:
+ *
+ *   Pass 1 (NEXT = NEXT_SZ): p is a dummy size_t counter, not a real
+ *     pointer.  The block runs purely as arithmetic to accumulate n.
+ *
+ *   Pass 2 (NEXT = NEXT_PTR): p is the real float* cursor into the
+ *     allocated slab.  Each field pointer is set and p advances.
+ *
+ * A new tensor requires ONE change — one NEXT() line in ALLOC_BLOCK.
+ * slab_size() cannot drift because it no longer exists.
+ *
+ * The runtime guard is kept as a belt-and-suspenders defence; it now
+ * checks that both passes agree rather than guarding against manual
+ * arithmetic errors, so it should never fire in practice.
  */
-static size_t slab_size(const VAEConfig *c) {
-  const int bs = c->batch_size;
-  size_t n = 0;
-  /* weights */
-  n += (size_t)c->enc_in * c->h1 + c->h1 + (size_t)c->h1 * c->h2 + c->h2 +
-       2 * ((size_t)c->h2 * c->latent + c->latent) + (size_t)c->dec_in * c->h1 +
-       c->h1 + (size_t)c->h1 * c->h2 + c->h2 + (size_t)c->h2 * IMAGE_SIZE +
-       IMAGE_SIZE;
-  /* activations (batch-sized) */
-  n +=
-      (size_t)bs * (c->h1 + c->h2 + 3 * c->latent + c->h1 + c->h2 + IMAGE_SIZE);
-  /* input buffers */
-  n += (size_t)bs * (c->enc_in + c->dec_in);
-  /* pre-activation buffers (batch-sized) */
-  n += (size_t)bs * (c->h1 + c->h2 + c->h1 + c->h2 + IMAGE_SIZE + c->latent);
-  /* backward scratch (single-sample) */
-  n += (size_t)(IMAGE_SIZE + c->h2 + c->h1 + 3 * c->latent + c->h2 + c->h1);
-  /* gradient accumulators */
-  n += (size_t)c->h2 * IMAGE_SIZE + IMAGE_SIZE + (size_t)c->h1 * c->h2 + c->h2 +
-       (size_t)c->dec_in * c->h1 + c->h1 +
-       2 * ((size_t)c->h2 * c->latent + c->latent) + (size_t)c->h1 * c->h2 +
-       c->h2 + (size_t)c->enc_in * c->h1 + c->h1;
-  /* Adam moment buffers (2× each weight/bias) */
-  n += 2 * ((size_t)c->enc_in * c->h1 + c->h1 + (size_t)c->h1 * c->h2 + c->h2 +
-            2 * ((size_t)c->h2 * c->latent + c->latent) +
-            (size_t)c->dec_in * c->h1 + c->h1 + (size_t)c->h1 * c->h2 + c->h2 +
-            (size_t)c->h2 * IMAGE_SIZE + IMAGE_SIZE);
-  return n;
-}
+
+/*
+ * ALLOC_BLOCK — the canonical ordered list of every slab allocation.
+ * M is a VAE* for pointer assignment in Pass 2; c is const VAEConfig*.
+ * NEXT(field_ptr, count) must be defined before expanding this macro.
+ */
+#define ALLOC_BLOCK(M, c, bs)                                                  \
+  /* weights */                                                                \
+  NEXT((M)->enc_w1, (c)->enc_in *(c)->h1);                                     \
+  NEXT((M)->enc_b1, (c)->h1);                                                  \
+  NEXT((M)->enc_w2, (c)->h1 *(c)->h2);                                         \
+  NEXT((M)->enc_b2, (c)->h2);                                                  \
+  NEXT((M)->mu_w, (c)->h2 *(c)->latent);                                       \
+  NEXT((M)->mu_b, (c)->latent);                                                \
+  NEXT((M)->lv_w, (c)->h2 *(c)->latent);                                       \
+  NEXT((M)->lv_b, (c)->latent);                                                \
+  NEXT((M)->dec_w1, (c)->dec_in *(c)->h1);                                     \
+  NEXT((M)->dec_b1, (c)->h1);                                                  \
+  NEXT((M)->dec_w2, (c)->h1 *(c)->h2);                                         \
+  NEXT((M)->dec_b2, (c)->h2);                                                  \
+  NEXT((M)->dec_w3, (c)->h2 *IMAGE_SIZE);                                      \
+  NEXT((M)->dec_b3, IMAGE_SIZE);                                               \
+  /* activations */                                                            \
+  NEXT((M)->enc_h1, (bs) * (c)->h1);                                           \
+  NEXT((M)->enc_h2, (bs) * (c)->h2);                                           \
+  NEXT((M)->mu, (bs) * (c)->latent);                                           \
+  NEXT((M)->logvar, (bs) * (c)->latent);                                       \
+  NEXT((M)->z, (bs) * (c)->latent);                                            \
+  NEXT((M)->dec_h1, (bs) * (c)->h1);                                           \
+  NEXT((M)->dec_h2, (bs) * (c)->h2);                                           \
+  NEXT((M)->output, (bs)*IMAGE_SIZE);                                          \
+  /* input buffers */                                                          \
+  NEXT((M)->enc_in_buf, (bs) * (c)->enc_in);                                   \
+  NEXT((M)->dec_in_buf, (bs) * (c)->dec_in);                                   \
+  /* pre-activations */                                                        \
+  NEXT((M)->pre_eh1, (bs) * (c)->h1);                                          \
+  NEXT((M)->pre_eh2, (bs) * (c)->h2);                                          \
+  NEXT((M)->pre_dh1, (bs) * (c)->h1);                                          \
+  NEXT((M)->pre_dh2, (bs) * (c)->h2);                                          \
+  NEXT((M)->pre_out, (bs)*IMAGE_SIZE);                                         \
+  NEXT((M)->eps_buf, (bs) * (c)->latent);                                      \
+  /* backward scratch (single-sample) */                                       \
+  NEXT((M)->sc_out, IMAGE_SIZE);                                               \
+  NEXT((M)->sc_dh2, (c)->h2);                                                  \
+  NEXT((M)->sc_dh1, (c)->h1);                                                  \
+  NEXT((M)->sc_z, (c)->latent);                                                \
+  NEXT((M)->sc_mu, (c)->latent);                                               \
+  NEXT((M)->sc_lv, (c)->latent);                                               \
+  NEXT((M)->sc_eh2, (c)->h2);                                                  \
+  NEXT((M)->sc_eh1, (c)->h1);                                                  \
+  /* gradient accumulators */                                                  \
+  NEXT((M)->dw3, (c)->h2 *IMAGE_SIZE);                                         \
+  NEXT((M)->db3, IMAGE_SIZE);                                                  \
+  NEXT((M)->dw2, (c)->h1 *(c)->h2);                                            \
+  NEXT((M)->db2, (c)->h2);                                                     \
+  NEXT((M)->dw1, (c)->dec_in *(c)->h1);                                        \
+  NEXT((M)->db1, (c)->h1);                                                     \
+  NEXT((M)->d_muw, (c)->h2 *(c)->latent);                                      \
+  NEXT((M)->d_mub, (c)->latent);                                               \
+  NEXT((M)->d_lvw, (c)->h2 *(c)->latent);                                      \
+  NEXT((M)->d_lvb, (c)->latent);                                               \
+  NEXT((M)->d_ew2, (c)->h1 *(c)->h2);                                          \
+  NEXT((M)->d_eb2, (c)->h2);                                                   \
+  NEXT((M)->d_ew1, (c)->enc_in *(c)->h1);                                      \
+  NEXT((M)->d_eb1, (c)->h1);                                                   \
+  /* Adam moment buffers */                                                    \
+  NEXT((M)->m_ew1, (c)->enc_in *(c)->h1);                                      \
+  NEXT((M)->v_ew1, (c)->enc_in *(c)->h1);                                      \
+  NEXT((M)->m_eb1, (c)->h1);                                                   \
+  NEXT((M)->v_eb1, (c)->h1);                                                   \
+  NEXT((M)->m_ew2, (c)->h1 *(c)->h2);                                          \
+  NEXT((M)->v_ew2, (c)->h1 *(c)->h2);                                          \
+  NEXT((M)->m_eb2, (c)->h2);                                                   \
+  NEXT((M)->v_eb2, (c)->h2);                                                   \
+  NEXT((M)->m_muw, (c)->h2 *(c)->latent);                                      \
+  NEXT((M)->v_muw, (c)->h2 *(c)->latent);                                      \
+  NEXT((M)->m_mub, (c)->latent);                                               \
+  NEXT((M)->v_mub, (c)->latent);                                               \
+  NEXT((M)->m_lvw, (c)->h2 *(c)->latent);                                      \
+  NEXT((M)->v_lvw, (c)->h2 *(c)->latent);                                      \
+  NEXT((M)->m_lvb, (c)->latent);                                               \
+  NEXT((M)->v_lvb, (c)->latent);                                               \
+  NEXT((M)->m_dw1, (c)->dec_in *(c)->h1);                                      \
+  NEXT((M)->v_dw1, (c)->dec_in *(c)->h1);                                      \
+  NEXT((M)->m_db1, (c)->h1);                                                   \
+  NEXT((M)->v_db1, (c)->h1);                                                   \
+  NEXT((M)->m_dw2, (c)->h1 *(c)->h2);                                          \
+  NEXT((M)->v_dw2, (c)->h1 *(c)->h2);                                          \
+  NEXT((M)->m_db2, (c)->h2);                                                   \
+  NEXT((M)->v_db2, (c)->h2);                                                   \
+  NEXT((M)->m_dw3, (c)->h2 *IMAGE_SIZE);                                       \
+  NEXT((M)->v_dw3, (c)->h2 *IMAGE_SIZE);                                       \
+  NEXT((M)->m_db3, IMAGE_SIZE);                                                \
+  NEXT((M)->v_db3, IMAGE_SIZE)
 
 /* ------------------------------------------------------------------ */
 /* Lifecycle                                                            */
@@ -91,10 +172,22 @@ VAE *create_vae(const VAEConfig *cfg, uint64_t rng_seed) {
 
   const VAEConfig *c = &m->cfg;
   const int bs = c->batch_size;
-  size_t n = slab_size(c);
 
-  /* Round up byte count to a multiple of SLAB_ALIGN — required by
-   * aligned_alloc. */
+  /*
+   * Pass 1 — compute slab size using a counter-only (no real pointer).
+   * NEXT(field, sz) here just adds sz to the counter n.
+   * A dummy struct is passed as M so the field references compile; it is
+   * never written to because the counter-NEXT ignores the left-hand side.
+   */
+  VAE _dummy;
+  size_t n = 0;
+  { /* Pass 1: count-only — field assignments are discarded */
+    float *_p = NULL;
+#define NEXT(field, sz) ((field) = _p, n += (size_t)(sz))
+    ALLOC_BLOCK(&_dummy, c, bs);
+#undef NEXT
+  }
+
   size_t byte_sz = n * sizeof(float);
   size_t aligned_sz = (byte_sz + SLAB_ALIGN - 1) & ~(size_t)(SLAB_ALIGN - 1);
 
@@ -113,97 +206,15 @@ VAE *create_vae(const VAEConfig *cfg, uint64_t rng_seed) {
   }
   memset(m->_mem, 0, aligned_sz);
 
+  /*
+   * Pass 2 — carve pointers from the real slab using the same ALLOC_BLOCK.
+   * NEXT now assigns the pointer and advances p.
+   */
   float *p = m->_mem;
-#define NEXT(ptr, sz) ((ptr) = p, p += (size_t)(sz))
-
-  /* weights */
-  NEXT(m->enc_w1, c->enc_in * c->h1);
-  NEXT(m->enc_b1, c->h1);
-  NEXT(m->enc_w2, c->h1 * c->h2);
-  NEXT(m->enc_b2, c->h2);
-  NEXT(m->mu_w, c->h2 * c->latent);
-  NEXT(m->mu_b, c->latent);
-  NEXT(m->lv_w, c->h2 * c->latent);
-  NEXT(m->lv_b, c->latent);
-  NEXT(m->dec_w1, c->dec_in * c->h1);
-  NEXT(m->dec_b1, c->h1);
-  NEXT(m->dec_w2, c->h1 * c->h2);
-  NEXT(m->dec_b2, c->h2);
-  NEXT(m->dec_w3, c->h2 * IMAGE_SIZE);
-  NEXT(m->dec_b3, IMAGE_SIZE);
-  /* activations */
-  NEXT(m->enc_h1, bs * c->h1);
-  NEXT(m->enc_h2, bs * c->h2);
-  NEXT(m->mu, bs * c->latent);
-  NEXT(m->logvar, bs * c->latent);
-  NEXT(m->z, bs * c->latent);
-  NEXT(m->dec_h1, bs * c->h1);
-  NEXT(m->dec_h2, bs * c->h2);
-  NEXT(m->output, bs * IMAGE_SIZE);
-  /* input buffers */
-  NEXT(m->enc_in_buf, bs * c->enc_in);
-  NEXT(m->dec_in_buf, bs * c->dec_in);
-  /* pre-activations */
-  NEXT(m->pre_eh1, bs * c->h1);
-  NEXT(m->pre_eh2, bs * c->h2);
-  NEXT(m->pre_dh1, bs * c->h1);
-  NEXT(m->pre_dh2, bs * c->h2);
-  NEXT(m->pre_out, bs * IMAGE_SIZE);
-  NEXT(m->eps_buf, bs * c->latent);
-  /* backward scratch (single-sample) */
-  NEXT(m->sc_out, IMAGE_SIZE);
-  NEXT(m->sc_dh2, c->h2);
-  NEXT(m->sc_dh1, c->h1);
-  NEXT(m->sc_z, c->latent);
-  NEXT(m->sc_mu, c->latent);
-  NEXT(m->sc_lv, c->latent);
-  NEXT(m->sc_eh2, c->h2);
-  NEXT(m->sc_eh1, c->h1);
-  /* gradient accumulators */
-  NEXT(m->dw3, c->h2 * IMAGE_SIZE);
-  NEXT(m->db3, IMAGE_SIZE);
-  NEXT(m->dw2, c->h1 * c->h2);
-  NEXT(m->db2, c->h2);
-  NEXT(m->dw1, c->dec_in * c->h1);
-  NEXT(m->db1, c->h1);
-  NEXT(m->d_muw, c->h2 * c->latent);
-  NEXT(m->d_mub, c->latent);
-  NEXT(m->d_lvw, c->h2 * c->latent);
-  NEXT(m->d_lvb, c->latent);
-  NEXT(m->d_ew2, c->h1 * c->h2);
-  NEXT(m->d_eb2, c->h2);
-  NEXT(m->d_ew1, c->enc_in * c->h1);
-  NEXT(m->d_eb1, c->h1);
-  /* Adam moment buffers */
-  NEXT(m->m_ew1, c->enc_in * c->h1);
-  NEXT(m->v_ew1, c->enc_in * c->h1);
-  NEXT(m->m_eb1, c->h1);
-  NEXT(m->v_eb1, c->h1);
-  NEXT(m->m_ew2, c->h1 * c->h2);
-  NEXT(m->v_ew2, c->h1 * c->h2);
-  NEXT(m->m_eb2, c->h2);
-  NEXT(m->v_eb2, c->h2);
-  NEXT(m->m_muw, c->h2 * c->latent);
-  NEXT(m->v_muw, c->h2 * c->latent);
-  NEXT(m->m_mub, c->latent);
-  NEXT(m->v_mub, c->latent);
-  NEXT(m->m_lvw, c->h2 * c->latent);
-  NEXT(m->v_lvw, c->h2 * c->latent);
-  NEXT(m->m_lvb, c->latent);
-  NEXT(m->v_lvb, c->latent);
-  NEXT(m->m_dw1, c->dec_in * c->h1);
-  NEXT(m->v_dw1, c->dec_in * c->h1);
-  NEXT(m->m_db1, c->h1);
-  NEXT(m->v_db1, c->h1);
-  NEXT(m->m_dw2, c->h1 * c->h2);
-  NEXT(m->v_dw2, c->h1 * c->h2);
-  NEXT(m->m_db2, c->h2);
-  NEXT(m->v_db2, c->h2);
-  NEXT(m->m_dw3, c->h2 * IMAGE_SIZE);
-  NEXT(m->v_dw3, c->h2 * IMAGE_SIZE);
-  NEXT(m->m_db3, IMAGE_SIZE);
-  NEXT(m->v_db3, IMAGE_SIZE);
+#define NEXT(field, sz) ((field) = p, p += (size_t)(sz))
+  ALLOC_BLOCK(m, c, bs);
 #undef NEXT
+#undef ALLOC_BLOCK
 
   /*
    * Slab integrity check — runtime guard, not assert().

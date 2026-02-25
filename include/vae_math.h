@@ -11,8 +11,8 @@
 #include <stdint.h>
 
 /* ── image / data ────────────────────────────────────────── */
-#define IMAGE_SIZE 784    /* 28 × 28 MNIST pixels   */
-#define PATH_BUF_SIZE 512 /* max filesystem path len */
+#define IMAGE_SIZE 784 /* 28 × 28 MNIST pixels   */
+/* PATH_BUF_SIZE lives in vae_config.h (filesystem paths are not math). */
 
 /* ── activation bounds ───────────────────────────────────── */
 #define ELU_ALPHA 0.2f

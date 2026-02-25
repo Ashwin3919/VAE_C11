@@ -127,12 +127,26 @@ void train(VAE *m, Dataset *ds) {
       vae_forward(m, &ds->images[start], &ds->labels[start], bsz, 1);
       float bloss = vae_loss(m, &ds->images[start], bsz, beta);
       if (isfinite(bloss)) {
+        /*
+         * Normal batch: accumulate gradients and take an Adam step.
+         * vae_model.h invariant: "vae_apply_gradients() MUST NOT be called
+         * if vae_backward() was skipped."  Both calls are guarded together
+         * so the invariant cannot be violated even if this block is refactored.
+         */
         vae_backward(m, &ds->images[start], &ds->labels[start], bsz, beta);
+        vae_apply_gradients(m, lr);
       } else {
+        /*
+         * NaN/Inf batch — skip backward AND apply_gradients entirely.
+         * Calling apply_gradients without a preceding backward would advance
+         * adam_t and apply stale first/second moments from prior batches,
+         * producing a silent phantom update.  Substitute a sentinel loss of
+         * 1.0 so the epoch average reflects the bad batch without corrupting
+         * the optimiser state.
+         */
         bloss = 1.0f;
       }
       total_loss += bloss;
-      vae_apply_gradients(m, lr);
     }
     float train_avg = total_loss / (float)nb;
 

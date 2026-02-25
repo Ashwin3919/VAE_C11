@@ -17,11 +17,16 @@
 #include "vae_io.h"
 #include "vae_math.h"
 #include "vae_model.h"
+#include "vae_rng.h"
 
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+
+/* Maximum batch size used across all tests.
+ * Keeping it as a compile-time constant avoids VLAs (C11 optional). */
+#define TEST_BSZ_MAX 4
 
 /* Create a tiny v1 model with fixed seed for reproducibility. */
 static VAE *make_test_model(void) {
@@ -67,17 +72,32 @@ static void test_loss_positive_finite(void) {
   ASSERT_TRUE(m != NULL);
   if (!m)
     return;
-  const int bsz = 4;
 
-  float buf[bsz][IMAGE_SIZE];
-  float *xs[bsz];
-  int ls[bsz];
+  /*
+   * Fixed-size buffer — no VLA.  C11 makes VLAs optional (Annex J), so
+   * code that depends on them is not portable to all conforming compilers.
+   * TEST_BSZ_MAX is a compile-time constant, so the array is stack-allocated
+   * with a known size without any runtime flexibility needed here.
+   */
+  const int bsz = TEST_BSZ_MAX;
+  float buf[TEST_BSZ_MAX][IMAGE_SIZE];
+  float *xs[TEST_BSZ_MAX];
+  int ls[TEST_BSZ_MAX];
+
+  /*
+   * Use the project's Rng instead of srand()/rand().
+   * Reasons: (1) rand() quality is implementation-defined and can be very
+   * poor; (2) srand()/rand() share global state — not thread-safe and affects
+   * other tests run in the same process; (3) Rng is already a project
+   * dependency and produces high-quality pseudo-random numbers.
+   */
+  Rng rng;
+  rng_init(&rng, /*seed=*/0xDEAD1234ULL);
   for (int i = 0; i < bsz; i++) {
     xs[i] = buf[i];
     ls[i] = i % 2;
-    srand((unsigned)i * 31 + 7);
     for (int j = 0; j < IMAGE_SIZE; j++)
-      xs[i][j] = (float)rand() / (float)RAND_MAX;
+      xs[i][j] = rng_uniform(&rng); /* uniform [0, 1) */
   }
 
   vae_forward(m, xs, ls, bsz, 1);
