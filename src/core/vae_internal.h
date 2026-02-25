@@ -1,5 +1,5 @@
 /*
- * vae_internal.h — private cross-TU declarations for src/core/*.c
+ * vae_internal.h — private cross-TU declarations for the src/core files.
  *
  * These symbols are defined in vae_forward.c but used by vae_loss.c
  * (and potentially vae_backward.c in the future).  Putting them here
