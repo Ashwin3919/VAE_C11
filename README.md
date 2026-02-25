@@ -52,11 +52,16 @@ Checkpoints are saved to `models/vae_vN.bin` every `save_every` epochs and reloa
 | `make` | `exe/vae_model` | v1 Mini | 0 & 1 | ~385K | 300 |
 | `make mid` | `exe/vae_model` | v2 Mid | 0 & 1 | ~1.1M | 400 |
 | `make full` | `exe/vae_model` | v3 Full | 0 – 9 | ~1.7M | 800 |
+| `make omp-mini` | `exe/vae_model_omp_mini` | v1 + OMP | 0 & 1 | ~385K | — |
+| `make omp-mid` | `exe/vae_model_omp_mid` | v2 + OMP | 0 & 1 | ~1.1M | — |
+| `make omp-full` | `exe/vae_model_omp_full` | v3 + OMP | 0 – 9 | ~1.7M | — |
+| `make omp` | all three above | — | — | — | — |
 | `make debug` | `exe/vae_model_debug` | v1 | 0 & 1 | ~385K | — |
 | `make asan` | `exe/vae_model_asan` | v1 | 0 & 1 | ~385K | — |
 | `make test` | `exe/run_tests` | — | — | — | — |
 | `make clean` | — | — | — | — | — |
 
+The `omp-mini/mid/full` targets build with `-Xclang -fopenmp` (Apple Clang) or `-fopenmp` (GCC on Linux), activating `#pragma omp parallel for` inside `linear_batch`. All three variants exist so you can compare per-model throughput improvement directly. Requires `libomp` — on macOS: `brew install libomp`.
 The `debug` target disables optimisation and enables `-g` for clean stack traces.
 The `asan` target builds with `-fsanitize=address,undefined` for catching memory errors and undefined behaviour.
 
@@ -194,22 +199,16 @@ typedef struct VAE {
     float *_mem;     // ← single heap slab; every pointer below points into it
 
     float *enc_w1, *enc_b1;   // [enc_in × h1] / [h1]
-    float *enc_w2, *enc_b2;   // [h1 × h2]     / [h2]
-    float *mu_w,   *mu_b;     // [h2 × latent] / [latent]
-    float *lv_w,   *lv_b;     // [h2 × latent] / [latent]
-    float *dec_w1, *dec_b1;   // [dec_in × h1] / [h1]
-    float *dec_w2, *dec_b2;   // [h1 × h2]     / [h2]
-    float *dec_w3, *dec_b3;   // [h2 × 784]    / [784]
     // ... activations, pre-activations, backward scratch,
     //     gradient accumulators, Adam m/v buffers
 } VAE;
 ```
 
 Benefits:
-- **One `calloc`, one `free`** — no fragmentation, predictable teardown.
-- **Cache-friendly layout** — related buffers are co-located in memory.
+- **One allocation, one free** — no fragmentation, predictable teardown.
+- **32-byte aligned** — slab is allocated via `aligned_alloc(32)` (one AVX2 register width). The compiler can emit `vmovaps` (aligned SIMD load) instead of `vmovups` in the GEMM inner loops, avoiding cache-line split penalties.
 - **No stack overflow** — even the largest variant (~1.7M params) lives entirely on the heap.
-- **Runtime integrity check** — `create_vae` asserts that the pointer after all `NEXT()` allocations exactly matches `_mem + slab_size()`, catching any layout/size mismatch at the first run.
+- **Runtime integrity guard** — after all `NEXT()` pointer assignments, `create_vae` verifies `p == _mem + slab_size()` with an explicit `if / abort()`, not `assert()`. `assert()` is compiled out by `-DNDEBUG`; the runtime guard is always active and prints an actionable diagnostic with the byte-level delta.
 
 `create_vae` returns `NULL` on allocation failure — it never calls `exit()`.
 
@@ -344,7 +343,13 @@ HEADERS = $(wildcard include/*.h)
 - `-ffast-math`: reassociation, FMA, no-NaN assumptions — consistent with the `isfinite` guards already in the loss.
 - `asan` target: `-fsanitize=address,undefined -fno-omit-frame-pointer` for catching heap/stack overflows, use-after-free, signed overflow, and null dereferences during development.
 
-**Dependency tracking** — `$(HEADERS)` is listed as an explicit prerequisite for every target (main binaries and tests). Any change to a public header forces a full rebuild of every binary that transitively includes it, preventing stale-object bugs. This is the conservative, portable approach: it rebuilds more than strictly necessary but never misses a required rebuild.
+**Tiled GEMM** — `linear_batch` iterates in `GEMM_TILE=64` blocks. A 64×64 `float` tile occupies 16 KB, fitting comfortably in a typical 32–64 KB L1 data cache. For each tile, `x[i]` values are reused across the full `j`-tile and `W[i][j…]` is a sequential row slice — reducing W cache-miss rate by O(bsz) versus the naive per-sample scan.
+
+**`restrict` pointers** — all `linear_batch` and `linear_single` arguments are declared `restrict`, asserting to the compiler that the buffers do not alias. Combined with `-O3 -march=native -ftree-vectorize`, this is the signal GCC/Clang need to auto-vectorise the innermost dot-product loop.
+
+**32-byte aligned slab** — `aligned_alloc(32)` guarantees that every `float*` carved from the slab is 32-byte aligned (one AVX2 register). With `restrict` already in place, the compiler can promote `vmovups` (potentially split across a cache line) to `vmovaps` (guaranteed single-line aligned load).
+
+**Dependency tracking** — `$(HEADERS)` is listed as an explicit prerequisite for every target (main binaries and tests). Any change to a public header forces a full rebuild of every binary that transitively includes it, preventing stale-object bugs.
 
 ---
 
@@ -387,7 +392,7 @@ Backward sections (innermost to outermost):
 ## Roadmap
 
 - [ ] Results: reconstructions and latent-space visualisations (coming after full training run)
-- [ ] BLAS matmul (`cblas_sgemm`) or OpenMP for training throughput
+- [x] OpenMP `parallel for` in `linear_batch` — `make omp` target (`lib_matmul` branch)
 - [ ] CI with ASAN gate
 
 ---

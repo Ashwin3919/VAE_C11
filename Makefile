@@ -4,6 +4,12 @@ CFLAGS  = -Wall -Wextra -O3 -std=c11 -march=native \
           -flto -fomit-frame-pointer
 LIBS    = -lm
 
+# ── OpenMP (Apple Clang requires explicit libomp from Homebrew) ────────
+# Override on Linux: make omp-mini LIBOMP_CFLAGS=-fopenmp LIBOMP_LIBS=-lgomp
+LIBOMP_PREFIX ?= $(shell brew --prefix libomp 2>/dev/null)
+LIBOMP_CFLAGS  = -Xclang -fopenmp -I$(LIBOMP_PREFIX)/include
+LIBOMP_LIBS    = -L$(LIBOMP_PREFIX)/lib -lomp
+
 # ── directories ────────────────────────────────────────────────────────
 EXE_DIR = exe
 INC     = include
@@ -67,14 +73,27 @@ asan: $(MAIN_SRC) $(CORE_SRCS) $(HEADERS)
 	    -fno-omit-frame-pointer $(IFLAGS) \
 	    -o $(EXE_DIR)/vae_model_asan $(MAIN_SRC) $(CORE_SRCS) $(LIBS)
 
-# ── OpenMP build — activates the #pragma omp parallel for in linear_batch
-# Uses a separate output binary so the default build stays dependency-free.
-# Requires GCC/Clang with -fopenmp support (brew install libomp on macOS).
-# Run with:  make omp && ./exe/vae_model_omp
-omp: $(MAIN_SRC) $(CORE_SRCS) $(HEADERS)
+# ── OpenMP builds — activates #pragma omp parallel for in linear_batch.
+# Three variants so training throughput can be compared across model sizes.
+# Usage: make omp        (builds all three)
+#        make omp-mini / omp-mid / omp-full   (individual)
+omp-mini: $(MAIN_SRC) $(CORE_SRCS) $(HEADERS)
 	@mkdir -p $(EXE_DIR)
-	$(CC) $(CFLAGS) $(IFLAGS) -fopenmp \
-	    -o $(EXE_DIR)/vae_model_omp $(MAIN_SRC) $(CORE_SRCS) $(LIBS)
+	$(CC) $(CFLAGS) $(IFLAGS) $(LIBOMP_CFLAGS) \
+	    -o $(EXE_DIR)/vae_model_omp_mini $(MAIN_SRC) $(CORE_SRCS) $(LIBS) $(LIBOMP_LIBS)
+
+omp-mid: $(MAIN_SRC) $(CORE_SRCS) $(HEADERS)
+	@mkdir -p $(EXE_DIR)
+	$(CC) $(CFLAGS) $(IFLAGS) $(LIBOMP_CFLAGS) -DVERSION_V2 \
+	    -o $(EXE_DIR)/vae_model_omp_mid $(MAIN_SRC) $(CORE_SRCS) $(LIBS) $(LIBOMP_LIBS)
+
+omp-full: $(MAIN_SRC) $(CORE_SRCS) $(HEADERS)
+	@mkdir -p $(EXE_DIR)
+	$(CC) $(CFLAGS) $(IFLAGS) $(LIBOMP_CFLAGS) -DVERSION_V3 -DFULL_MNIST \
+	    -o $(EXE_DIR)/vae_model_omp_full $(MAIN_SRC) $(CORE_SRCS) $(LIBS) $(LIBOMP_LIBS)
+
+# Convenience alias — builds all three OMP variants at once.
+omp: omp-mini omp-mid omp-full
 
 # ── results viewer (standalone, no VAE dependency) ────────────────────
 $(EXE_DIR)/view_results: $(SRC)/view_results.c
@@ -107,4 +126,4 @@ test: $(TEST_SRCS) $(HEADERS)
 clean:
 	rm -rf $(EXE_DIR) *.o *.pgm
 
-.PHONY: all v2 mid full debug asan omp test clean
+.PHONY: all v2 mid full debug asan omp omp-mini omp-mid omp-full test clean
