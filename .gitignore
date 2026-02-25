@@ -27,6 +27,13 @@ diffusion_model_v3_2
 diffusion_model_*
 view_images
 view_training_data
+exe/
+
+# ─── Debug symbols (macOS dSYM bundles) ─────────────────────────────
+*.dSYM/
+
+# ─── Scratch / discarded work ────────────────────────────────────────
+trash/
 
 # ─── Build artifacts ─────────────────────────────────────────────────
 *.o
