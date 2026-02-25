@@ -1,285 +1,399 @@
-# High-Performance MNIST VAE in C
-## From Basic Implementation to Optimized 10-Digit Generation
+# MNIST Conditional VAE in C
 
-A comprehensive Variational Autoencoder (VAE) implementation in pure C, showcasing progressive optimization from a basic 2-digit model to a high-performance 10-digit MNIST generator.
-
----
-
-## 🎯 **Project Evolution Summary**
-
-| Version | Parameters | Digits | Performance | Architecture | Key Innovation |
-|---------|------------|--------|-------------|--------------|----------------|
-| **v1.0** | ~2.8M | 0-1 | 1,600 samples/s | 784→1024→512→128→512→1024→784 | Basic VAE implementation |
-| **v2.0** | ~1.1M | 0-1 | 4,000+ samples/s | 784→512→256→64→256→512→784 | Progressive training modes |
-| **v3.0** | ~1.7M | 0-9 | 3,500+ samples/s | 784→640→320→128→320→640→784 | Full MNIST with conditional generation |
+A ground-up implementation of a **Conditional Variational Autoencoder (CVAE)** in pure C11, trained on MNIST, with zero external dependencies beyond `libc` and `libm`.
 
 ---
 
-## 🧠 **Technical Architecture**
+## Motivation
 
-### **Current Model (v3.0) - Full MNIST**
-```c
-// Architecture Configuration
-#define IMAGE_SIZE 784           // 28x28 MNIST images
-#define ENCODER_HIDDEN1 640      // First encoder layer
-#define ENCODER_HIDDEN2 320      // Second encoder layer  
-#define LATENT_SIZE 128          // Latent space dimensionality
-#define DECODER_HIDDEN1 320      // First decoder layer
-#define DECODER_HIDDEN2 640      // Second decoder layer
-#define BATCH_SIZE 64            // Optimized batch size
-#define LEARNING_RATE 0.0008f    // Adaptive learning rate
-```
+This project is a deliberate exercise in understanding a machine learning model at its lowest level.
 
-### **Network Flow**
-```
-Input (784) → [640 nodes] → [320 nodes] → [128D latent] → [320 nodes] → [640 nodes] → Output (784)
-            ↓ ELU         ↓ ELU        ↓ Linear      ↓ ELU         ↓ ELU         ↓ Sigmoid
-         Encoder                    Reparameterization                     Decoder
-```
+The starting point: *can I implement a VAE — the math, the training loop, the backpropagation — without hiding anything behind a library?*
 
-### **Parameter Breakdown**
-```
-Encoder:    784×640 + 640×320 + 320×128 = 745,280 parameters
-Decoder:    128×320 + 320×640 + 640×784 = 745,280 parameters
-Biases:     640 + 320 + 128 + 320 + 640 + 784 = 2,832 parameters
-──────────────────────────────────────────────────────────────
-Total:      1,493,392 parameters (~1.7M)
-```
+Writing it in C means every design choice is visible and intentional. There is no automatic differentiation, no tensor abstraction, no GPU kernel. The matrix multiplies, the gradient accumulators, the Adam moment buffers, the reparameterisation trick — all written explicitly, in the open, readable in a single afternoon.
+
+The secondary goal was to write that code at a standard that would hold up under engineering review: strict module boundaries, a single-slab heap memory model, per-instance RNG with no shared mutable state, a numerical gradient check in the test suite, and endian-safe binary checkpoints. This is not about C being the right tool for ML in production. It is about using C as a substrate that forces clarity.
 
 ---
 
-## 🚀 **Key Innovations & Optimizations**
+## Quick Start
 
-### **1. Progressive Training Modes**
-```c
-typedef enum {
-    TRAINING_MODE_FAST,      // Epochs 0-150: Minimal regularization
-    TRAINING_MODE_BALANCED,  // Epochs 150-400: Moderate processing
-    TRAINING_MODE_QUALITY    // Epochs 400+: Full quality pipeline
-} TrainingMode;
-```
-
-### **2. ELU Activation Functions**
-- **Better gradient flow** than ReLU/LeakyReLU
-- **Smooth negative values** prevent dead neurons
-- **Conditional compilation** for performance comparison
-
-### **3. Adaptive Beta Scheduling**
-```c
-// Mode-dependent KL regularization
-float get_adaptive_beta(int epoch, TrainingMode mode) {
-    switch(mode) {
-        case TRAINING_MODE_FAST:     return 0.00001f + epoch * 0.000005f;
-        case TRAINING_MODE_BALANCED: return 0.0002f + epoch * 0.000002f;
-        case TRAINING_MODE_QUALITY:  return 0.0005f + epoch * 0.000001f;
-    }
-}
-```
-
-### **4. Memory-Optimized Implementation**
-- **Pre-allocated buffers**: No dynamic allocation during training
-- **SIMD-friendly layouts**: Contiguous memory for vector operations
-- **Cache-efficient access patterns**: Minimized memory bandwidth usage
-- **Memory footprint**: 4.3MB (75% reduction from v1.0)
-
-### **5. Conditional Generation Support**
-```c
-// Generate specific digits (0-9) with latent space conditioning
-void generate_digit_samples(VAE *vae, int digit, int num_samples);
-
-// Full MNIST mode with 10-class support
-#ifdef FULL_MNIST_MODE
-    // Loads all digits 0-9 with balanced sampling
-#else
-    // Binary mode: digits 0-1 only (backward compatible)
-#endif
-```
-
----
-
-## 🔬 **Performance Metrics**
-
-### **Training Performance**
-```
-┌─────────────┬──────────────┬──────────────┬──────────────┐
-│   Metric    │     v1.0     │     v2.0     │     v3.0     │
-├─────────────┼──────────────┼──────────────┼──────────────┤
-│ Speed       │ 1,600 smp/s  │ 4,000+ smp/s │ 3,500+ smp/s │
-│ Memory      │ ~17MB        │ 4.3MB        │ 5.2MB        │
-│ Parameters  │ 2.8M         │ 1.1M         │ 1.7M         │
-│ Convergence │ 200+ epochs  │ 130 epochs   │ 180 epochs   │
-│ Quality     │ Good         │ Excellent    │ Exceptional  │
-└─────────────┴──────────────┴──────────────┴──────────────┘
-```
-
-### **Loss Convergence**
-```
-v3.0 Training Progress:
-Epoch   0: Loss=0.3892, Speed=3756/s, Memory≈5.2MB [FAST]
-Epoch  50: Loss=0.1234, Speed=3654/s, Memory≈5.2MB [FAST]  
-Epoch 150: Loss=0.0756, Speed=3598/s, Memory≈5.2MB [BALANCED]
-Epoch 300: Loss=0.0523, Speed=3512/s, Memory≈5.2MB [BALANCED]
-Epoch 500: Loss=0.0445, Speed=3467/s, Memory≈5.2MB [QUALITY]
-```
-
----
-
-## 🛠️ **Building & Usage**
-
-### **Prerequisites**
 ```bash
-# Standard C compiler with math library
-gcc --version  # GCC 4.8+ or Clang 3.9+
+# 1. Get the MNIST data (one-time download)
+./download_mnist.sh
+
+# 2. Build and train the mini model (digits 0 & 1, ~385K params)
+make
+./exe/vae_model
+
+# 3. Train the full model (all 10 digits, ~1.7M params)
+make full
+./exe/vae_model
+
+# 4. View generated PGM images
+./convert_to_png.sh          # converts results_main/*/  to PNG
+
+# 5. Run the test suite (no MNIST data required)
+make test
+
+# 6. Run with AddressSanitizer + UBSan (development)
+make asan
+./exe/vae_model_asan
 ```
 
-### **Quick Start**
-   ```bash
-# 1. Download MNIST dataset
-   ./download_mnist.sh
-
-# 2. Build the optimized VAE
-make clean && make
-
-# 3. Run full MNIST training (0-9 digits)
-./vae_model
-
-# 4. View generated samples
-ls results/png/
-```
-
-### **Compilation Modes**
-   ```bash
-# Full MNIST mode (all 10 digits)
-make CFLAGS="-O3 -DFULL_MNIST_MODE"
-
-# Binary mode (digits 0-1 only)  
-make CFLAGS="-O3"
-
-# Debug mode with detailed logging
-make CFLAGS="-g -DDEBUG_MODE -DFULL_MNIST_MODE"
-```
+Checkpoints are saved to `models/vae_vN.bin` every `save_every` epochs and reloaded automatically on restart — training is fully resumable.
 
 ---
 
-## 📂 **Project Structure**
+## Build Targets
 
-```
-mnist-vae-c/
-├── vae_model.c          # Main VAE implementation with progressive training
-├── mnist_loader.c       # Optimized MNIST data loader (binary/full mode)
-├── Makefile            # Build configuration with optimization flags
-├── README.md           # This comprehensive documentation
-├── TECHNICAL_REPORT.md # Detailed development journey & benchmarks
-├── download_mnist.sh   # MNIST dataset downloader
-├── convert_to_png.sh   # PGM to PNG conversion utility
-├── data/               # MNIST dataset files
-│   ├── train-images-idx3-ubyte
-│   ├── train-labels-idx1-ubyte  
-│   ├── t10k-images-idx3-ubyte
-│   └── t10k-labels-idx1-ubyte
-└── results/            # Generated samples and training outputs
-    └── png/            # High-quality PNG outputs
-```
+| Target | Binary | Model | Digits | Params | Epochs |
+|---|---|---|---|---|---|
+| `make` | `exe/vae_model` | v1 Mini | 0 & 1 | ~385K | 300 |
+| `make mid` | `exe/vae_model` | v2 Mid | 0 & 1 | ~1.1M | 400 |
+| `make full` | `exe/vae_model` | v3 Full | 0 – 9 | ~1.7M | 800 |
+| `make debug` | `exe/vae_model_debug` | v1 | 0 & 1 | ~385K | — |
+| `make asan` | `exe/vae_model_asan` | v1 | 0 & 1 | ~385K | — |
+| `make test` | `exe/run_tests` | — | — | — | — |
+| `make clean` | — | — | — | — | — |
+
+The `debug` target disables optimisation and enables `-g` for clean stack traces.
+The `asan` target builds with `-fsanitize=address,undefined` for catching memory errors and undefined behaviour.
 
 ---
 
-## 🎨 **Generated Samples**
+## Codebase Layout
 
-The model produces three types of outputs:
+```
+.
+├── src/
+│   ├── main.c                    # Entry point — selects config, trains, generates
+│   ├── config/vae_config.c       # Runtime config presets (v1 / v2 / v3)
+│   ├── core/vae_model.c          # Forward pass, ELBO loss, backprop, Adam step
+│   ├── optimizer/vae_optimizer.c # Stateless adam_update() helper
+│   ├── rng/vae_rng.c             # xorshift-64 + Box-Muller, per-instance state
+│   ├── train/vae_train.c         # Training loop: LR schedule, KL annealing,
+│   │                             #   batched validation, early stopping
+│   ├── generate/vae_generate.c   # Conditional and interpolated sample generation
+│   ├── io/vae_io.c               # Checkpoint save / load (explicit LE binary format)
+│   └── mnist_loader.c            # IDX file parser, digit-class filtering
+│
+├── include/                      # Public headers — one per module
+│   ├── vae_config.h
+│   ├── vae_math.h                # Inline activations, named constants
+│   ├── vae_model.h
+│   ├── vae_optimizer.h
+│   ├── vae_rng.h
+│   ├── vae_train.h
+│   ├── vae_io.h
+│   ├── vae_generate.h
+│   └── mnist_loader.h
+│
+└── tests/
+    ├── test_framework.h          # Zero-dependency ASSERT_EQ / ASSERT_NEAR / RUN_TEST
+    ├── test_rng.c                # RNG determinism, uniform/normal distribution stats
+    ├── test_optimizer.c          # Adam convergence, gradient-ownership contract
+    ├── test_model.c              # Determinism, loss, checkpoint roundtrip,
+    │                             #   backward gradients, numerical gradient check
+    ├── test_train.c              # Integration: loss decreases over 3 epochs
+    └── run_tests.c               # Entry point — accumulates suite totals
+```
 
-### **1. Conditional Generation**
+Each module exposes a single header and has no knowledge of others beyond what it explicitly includes. Changes to the optimizer do not recompile the RNG.
+
+---
+
+## Architecture
+
+This is a **Conditional VAE (CVAE)**. The digit label is one-hot encoded and concatenated directly into both the encoder input and the decoder input, allowing the model to generate a specific digit on demand.
+
+```
+                ┌──────────────────── ENCODER ──────────────────────┐
+                │                                                    │
+ image (784) ─→ │  Linear(enc_in→h1, ELU)  →  Linear(h1→h2, ELU)  │ ─→ μ  [latent]
+ label (nc)  ─→ │                              Linear(h2→latent)    │ ─→ log σ²  [latent]
+                └────────────────────────────────────────────────────┘
+
+                      ┌─── REPARAMETERISATION ───┐
+                      │  z = μ + σ · ε,  ε ~ N(0,I)  │
+                      └──────────────────────────────┘
+
+                ┌──────────────────── DECODER ──────────────────────┐
+                │                                                    │
+ z (latent)  ─→ │  Linear(dec_in→h1, ELU)  →  Linear(h1→h2, ELU)  │ ─→ x̂  [784]
+ label (nc)  ─→ │                              Linear(h2→784, Sigmoid) │
+                └────────────────────────────────────────────────────┘
+```
+
+**enc_in** = IMAGE_SIZE + num_classes
+**dec_in** = latent + num_classes
+
+**Loss (ELBO)**:
+```
+L = BCE(x, x̂) / IMAGE_SIZE  +  β · KL(N(μ,σ²) ∥ N(0,I)) / latent
+```
+
+`β` is linearly annealed from `beta_start` → `beta_end` over `beta_anneal` epochs after a `beta_warmup` phase, giving reconstruction space to converge before regularisation is tightened.
+
+---
+
+## Configuration
+
+All hyperparameters and paths live in `VAEConfig`. There are no compile-time `#define` knobs for architecture sizes. Three presets are provided; any field can be overridden after calling a preset constructor:
+
 ```c
-// Generate 3 samples each for digits 0-9
-for (int digit = 0; digit <= 9; digit++) {
-    generate_digit_samples(vae, digit, 3);
-}
+VAEConfig cfg = vae_config_v1();  // start from a preset
+cfg.latent           = 48;        // override whatever you need
+cfg.epochs           = 500;
+cfg.lr_warmup_epochs = 50;
+cfg.data_dir         = "/datasets/mnist";
+VAE *model = create_vae(&cfg, /*rng_seed=*/42ULL);
+if (!model) { /* handle OOM */ }
 ```
 
-### **2. Random Generation**  
+### Full field reference
+
+| Field | Type | Description |
+|---|---|---|
+| `h1`, `h2` | `int` | Hidden layer widths (encoder and decoder share the same widths) |
+| `latent` | `int` | Latent vector dimension |
+| `num_classes` | `int` | Number of conditioning classes (2 for binary, 10 for full MNIST) |
+| `enc_in` | `int` | Derived: `IMAGE_SIZE + num_classes` — do not set manually |
+| `dec_in` | `int` | Derived: `latent + num_classes` — do not set manually |
+| `batch_size` | `int` | Mini-batch size |
+| `epochs` | `int` | Total training epochs |
+| `lr` | `float` | Peak learning rate (Adam) |
+| `beta_start` | `float` | KL weight at the start of annealing |
+| `beta_end` | `float` | KL weight at the end of annealing |
+| `grad_clip` | `float` | Per-element gradient clip threshold |
+| `beta_warmup` | `int` | Epochs before KL annealing begins |
+| `beta_anneal` | `int` | Epochs over which β ramps from `beta_start` → `beta_end` |
+| `save_every` | `int` | Checkpoint interval (epochs) |
+| `lr_warmup_epochs` | `int` | Epochs for linear LR ramp-up (0 → `lr`) |
+| `es_patience` | `int` | Early stopping: max epochs without validation improvement |
+| `es_min_epoch` | `int` | Early stopping: never stop before this epoch |
+| `full_mnist` | `int` | 1 = load all 60K samples / 10 digits; 0 = digits 0–1 only |
+| `data_dir` | `const char *` | Path to the directory containing the MNIST IDX files |
+| `result_dir` | `const char *` | Directory for generated PGM output files |
+| `model_dir` | `const char *` | Directory for checkpoint files |
+| `model_file` | `const char *` | Full path to the checkpoint file |
+| `version_tag` | `const char *` | Label printed in log output (`"v1"`, `"v2"`, `"v3"`) |
+
+---
+
+## Memory Model
+
+Every `VAE` instance allocates a **single contiguous slab** on the heap at creation time. All weight matrices, activation buffers, gradient accumulators, and Adam moment buffers are carved out of this slab via pointer arithmetic.
+
 ```c
-// Generate 15 diverse samples from learned distribution
-generate_samples(vae, 15);
+typedef struct VAE {
+    VAEConfig cfg;   // runtime config — no compile-time #ifdefs
+    Rng       rng;   // per-instance RNG — thread-safe by construction
+    int       adam_t;
+
+    float *_mem;     // ← single heap slab; every pointer below points into it
+
+    float *enc_w1, *enc_b1;   // [enc_in × h1] / [h1]
+    float *enc_w2, *enc_b2;   // [h1 × h2]     / [h2]
+    float *mu_w,   *mu_b;     // [h2 × latent] / [latent]
+    float *lv_w,   *lv_b;     // [h2 × latent] / [latent]
+    float *dec_w1, *dec_b1;   // [dec_in × h1] / [h1]
+    float *dec_w2, *dec_b2;   // [h1 × h2]     / [h2]
+    float *dec_w3, *dec_b3;   // [h2 × 784]    / [784]
+    // ... activations, pre-activations, backward scratch,
+    //     gradient accumulators, Adam m/v buffers
+} VAE;
 ```
 
-### **3. Progressive Enhancement**
-- **Mode FAST**: Basic reconstruction with minimal processing
-- **Mode BALANCED**: Moderate enhancement with noise reduction  
-- **Mode QUALITY**: Full enhancement pipeline with sharpening
+Benefits:
+- **One `calloc`, one `free`** — no fragmentation, predictable teardown.
+- **Cache-friendly layout** — related buffers are co-located in memory.
+- **No stack overflow** — even the largest variant (~1.7M params) lives entirely on the heap.
+- **Runtime integrity check** — `create_vae` asserts that the pointer after all `NEXT()` allocations exactly matches `_mem + slab_size()`, catching any layout/size mismatch at the first run.
+
+`create_vae` returns `NULL` on allocation failure — it never calls `exit()`.
 
 ---
 
-## 🧪 **Technical Achievements**
+## Training Loop
 
-### **Optimization Highlights**
-- **4x Performance Improvement**: 1,600 → 4,000+ samples/s (v1.0 → v2.0)
-- **60% Parameter Reduction**: 2.8M → 1.1M parameters while maintaining quality
-- **75% Memory Reduction**: 17MB → 4.3MB working memory
-- **10-Digit Extension**: Seamless scaling from binary to full MNIST
+The training loop in `vae_train.c` handles:
 
-### **Algorithm Innovations**
-- **Progressive Training**: Mode-dependent regularization and enhancement
-- **ELU Activations**: Superior gradient flow vs ReLU variants
-- **Adaptive Scheduling**: Dynamic beta values based on training phase
-- **Conditional Latent Space**: Digit-specific generation with latent conditioning
-
-### **Systems Programming**
-- **Zero Dependencies**: Pure C with only standard math library
-- **SIMD-Ready**: Memory layouts optimized for vectorization
-- **Cache-Efficient**: Minimized memory access patterns
-- **Cross-Platform**: Works on Linux, macOS, Windows
+1. **Dataset split** — Fisher-Yates shuffle on load, then 90/10 train/val split.
+2. **LR schedule** — linear warmup for `lr_warmup_epochs` epochs, then cosine decay to 5% of peak.
+3. **KL annealing** — β held at `beta_start` during warmup, linearly ramped to `beta_end` over `beta_anneal` epochs.
+4. **Batched validation** — full validation pass each epoch; val loss used for early stopping.
+5. **Early stopping** — stops if val loss has not improved in `es_patience` epochs, but not before `es_min_epoch`.
+6. **Checkpointing** — saves the model with the best validation loss; reloads on restart.
 
 ---
 
-## 📊 **Comparison with PyTorch VAEs**
+## RNG
 
-| Framework | Parameters | Training Speed | Memory | Dependencies |
-|-----------|------------|----------------|---------|---------------|
-| **This C VAE** | 1.7M | 3,500+ smp/s | 5.2MB | None |
-| PyTorch Simple | 640K | ~800 smp/s | 120MB+ | PyTorch + CUDA |
-| PyTorch Conv | 200K | ~1,200 smp/s | 80MB+ | PyTorch + CUDA |
-| TensorFlow | 830K | ~600 smp/s | 150MB+ | TF + dependencies |
+The original implementation used a file-scope static for random state — a latent data race for any multi-threaded future. The RNG uses an owned struct:
 
-**Key Advantages**: 3-6x faster training, 15-30x less memory, zero dependencies
+```c
+typedef struct { uint64_t state; int spare_ready; float spare; } Rng;
 
----
-
-## 🎯 **Future Enhancements**
-
-### **Planned Features**
-- [ ] **Multi-threading**: Parallel batch processing
-- [ ] **SIMD Intrinsics**: AVX2/NEON optimizations  
-- [ ] **Quantization**: INT8 inference mode
-- [ ] **Model Pruning**: Sparse parameter matrices
-- [ ] **WebAssembly**: Browser deployment
-- [ ] **ARM Optimization**: Raspberry Pi / Mobile deployment
-
-### **Advanced Architectures**
-- [ ] **Convolutional VAE**: CNN encoder/decoder
-- [ ] **β-VAE**: Controllable disentanglement
-- [ ] **WAE**: Wasserstein Auto-Encoder
-- [ ] **Vector Quantization**: VQ-VAE implementation
-
----
-
-## 📝 **Citation & Credits**
-
-```bibtex
-@software{mnist_vae_c_2024,
-  title={High-Performance MNIST VAE in C},
-  author={Your Name},
-  year={2024},
-  url={https://github.com/your-username/mnist-vae-c},
-  note={Pure C implementation with progressive optimization}
-}
+float rng_normal(Rng *r);    // Box-Muller — cached spare avoids wasted draws
+float rng_uniform(Rng *r);   // xorshift-64
+int   rng_int(Rng *r, int n);
 ```
 
-**License**: MIT License - Feel free to use, modify, and distribute!
-
-**Acknowledgments**: 
-- MNIST dataset by Yann LeCun et al.
-- VAE architecture inspired by Kingma & Welling (2013)
-- Performance optimizations based on systems programming best practices
+Each `VAE` instance owns a `Rng`. Two models seeded differently produce fully independent noise — a prerequisite for correct data-parallel training.
 
 ---
 
-*For detailed development journey, benchmarks, and technical deep-dive, see [TECHNICAL_REPORT.md](TECHNICAL_REPORT.md)* 
+## Optimizer
+
+Adam is a **stateless helper**. The caller (`VAE`) owns the moment buffers and step counter. Gradient zeroing is the **sole responsibility of `vae_reset_grads()`**, which `memset`s all accumulator arrays before each batch. `adam_update()` reads the gradient and updates weights and moments — it does not zero the gradient, avoiding a hidden side effect.
+
+```c
+// Called once before each batch
+vae_reset_grads(m);
+
+// Then: forward → loss → backward → apply
+vae_forward(m, xs, ls, bsz, /*training=*/1);
+vae_backward(m, xs, ls, bsz, beta);
+vae_apply_gradients(m, lr);   // calls adam_update for each layer
+```
+
+---
+
+## Checkpoint Format
+
+Checkpoints are stored as explicit **little-endian binary**, portable across architectures (x86, ARM, big-endian RISC):
+
+```
+[uint32 LE]  magic    = 0x45415643  ('CVAE')
+[uint32 LE]  version  = 4
+[float* LE]  weights: enc_w1 enc_b1 enc_w2 enc_b2 mu_w mu_b lv_w lv_b
+                       dec_w1 dec_b1 dec_w2 dec_b2 dec_w3 dec_b3
+[uint32 LE]  adam_t
+[float* LE]  Adam m_ and v_ buffers (same layer order as weights)
+```
+
+Each float is written as 4 bytes in canonical LE order via `write_le_floats()` — host byte order is irrelevant. Old v3 checkpoints (raw `fwrite`) are rejected with an actionable message; re-train to produce a v4 checkpoint.
+
+---
+
+## API Call Sequence
+
+The required per-batch call order is documented in `include/vae_model.h`:
+
+```c
+vae_reset_grads(m);                          // 1. zero accumulators
+vae_forward(m, xs, labels, bsz, training=1); // 2. encoder + decoder
+float loss = vae_loss(m, xs, bsz, beta);     // 3. ELBO (reads output)
+vae_backward(m, xs, labels, bsz, beta);      // 4. accumulate grads
+vae_apply_gradients(m, lr);                  // 5. Adam step
+```
+
+Key contracts (stated explicitly in each header):
+
+| Invariant | Where documented |
+|---|---|
+| `vae_loss` / `vae_backward` must follow `vae_forward` for the same batch | `include/vae_model.h` |
+| `vae_reset_grads` must precede each call to `vae_backward` | `include/vae_model.h` |
+| `adam_update` does **not** zero `dw` — that is the caller's job | `include/vae_optimizer.h` |
+| `load_model` requires a VAE created with a matching `VAEConfig` | `include/vae_io.h` |
+| `train` requires `num_classes` to be consistent with dataset labels | `include/vae_train.h` |
+
+For inference (no weight update), call only `vae_forward` + `vae_loss`; skip steps 1, 4, and 5.
+
+---
+
+## Test Suite
+
+Tests use a zero-dependency header-only framework (`test_framework.h`). All tests link against the same implementation files as the production binary — no mocking.
+
+```bash
+make test
+# Output:
+# ALL 22765 TESTS PASSED   (exits 0; exits 1 on any failure)
+```
+
+| Suite | Tests |
+|---|---|
+| `test_rng` | Determinism across seeds; `[0,1)` range; normal mean/variance; `rng_int` bounds |
+| `test_optimizer` | Adam convergence on scalar x²; `dw` is **not** zeroed by `adam_update` (documents the contract); vector convergence |
+| `test_model` | Forward determinism (same seed); loss finite & positive; checkpoint save→load roundtrip; backward non-zero gradients; **numerical gradient check**; **bsz=1 edge case**; **extreme pixel values (0.0 / 1.0)** |
+| `test_train` | Integration: loss strictly decreases over 3 epochs on synthetic data; **KL annealing schedule correctness** |
+
+**Numerical gradient check** — the gold standard for backprop: compares `∂L/∂b₃[k]` from `vae_backward` against `(L(b₃[k]+ε) − L(b₃[k]−ε)) / 2ε` for four output-layer bias parameters, verifying the full chain rule end-to-end.
+
+**bsz=1 edge case** — exercises per-sample pointer arithmetic and backward scratch buffers; off-by-one stride errors surface as wrong outputs or UBSan hits.
+
+**Extreme pixel values** — verifies that the log-clamping guard in `vae_loss` (`p = vae_clamp(out, 1e-7, 1-1e-7)`) prevents `-Inf` loss when input pixels are exactly 0.0 or 1.0.
+
+**KL annealing schedule** — replicated formula verified at five key points: warmup floor, midpoint, end-of-anneal, post-anneal clamp, and monotonicity over the full window.
+
+---
+
+## Build System
+
+```makefile
+CFLAGS  = -Wall -Wextra -O3 -std=c11 -march=native \
+          -ffast-math -funroll-loops -ftree-vectorize \
+          -flto -fomit-frame-pointer
+HEADERS = $(wildcard include/*.h)
+```
+
+- `-march=native`: emits SIMD (SSE/AVX on x86, NEON on ARM) for the matrix loops via auto-vectorisation.
+- `-flto`: cross-translation-unit inlining; the compiler can inline `linear_batch` into the training loop.
+- `-ffast-math`: reassociation, FMA, no-NaN assumptions — consistent with the `isfinite` guards already in the loss.
+- `asan` target: `-fsanitize=address,undefined -fno-omit-frame-pointer` for catching heap/stack overflows, use-after-free, signed overflow, and null dereferences during development.
+
+**Dependency tracking** — `$(HEADERS)` is listed as an explicit prerequisite for every target (main binaries and tests). Any change to a public header forces a full rebuild of every binary that transitively includes it, preventing stale-object bugs. This is the conservative, portable approach: it rebuilds more than strictly necessary but never misses a required rebuild.
+
+---
+
+## Backward Pass (Chain Rule Derivations)
+
+`vae_backward()` in `src/core/vae_model.c` loops over samples and accumulates gradients into the slab. Each section is annotated with the chain rule step it implements; here is the summary:
+
+```
+Forward graph (per sample):
+  enc_in → [ELU] enc_h1 → [ELU] enc_h2 → mu, logvar
+                                           ↓ reparameterisation
+  z = mu + exp(0.5·lv) · ε,  ε ~ N(0,I)
+  dec_in=[z|label] → [ELU] dec_h1 → [ELU] dec_h2 → [Sigmoid] output
+
+Loss (ELBO):
+  L = BCE(x, output) / IMAGE_SIZE  +  β · KL(q ∥ p) / latent
+  KL = -0.5 · Σ_i [1 + lv_i - mu_i² - exp(lv_i)]
+```
+
+Backward sections (innermost to outermost):
+
+| Section | Gradient computed | Formula |
+|---|---|---|
+| Output layer | `d_out[i]` | `(output_i − x_i) / (IMAGE_SIZE · bsz)` — BCE+sigmoid combined |
+| dec_w3 / dec_b3 | weight/bias grads | outer product `dec_h2 ⊗ d_out` |
+| dec_h2 (into ELU) | upstream signal | `W3ᵀ · d_out`, then `· ELU'(pre_dh2)` |
+| dec_w2, dec_b2 | weight/bias grads | outer product `dec_h1 ⊗ d_pre_dh2` |
+| dec_h1 (into ELU) | upstream signal | `W2ᵀ · d_pre_dh2`, then `· ELU'(pre_dh1)` |
+| dec_w1, dec_b1 | weight/bias grads | outer product `dec_in ⊗ d_pre_dh1` |
+| d_z | grad into latent | `W1ᵀ · d_pre_dh1` (label slots discarded) |
+| Reparameterisation | `d_mu`, `d_lv` | `d_z + β·mu/(latent·bsz)` ; `d_z·0.5·σ·ε + β·0.5·(exp(lv)−1)/(latent·bsz)` |
+| mu/lv heads | `d_muw`, `d_lvw` | outer products `enc_h2 ⊗ d_mu/d_lv` |
+| enc_h2 (into ELU) | upstream signal | `mu_wᵀ·d_mu + lv_wᵀ·d_lv`, then `· ELU'(pre_eh2)` |
+| enc_w2, enc_b2 | weight/bias grads | outer product `enc_h1 ⊗ d_pre_eh2` |
+| enc_h1 (into ELU) | upstream signal | `enc_w2ᵀ · d_pre_eh2`, then `· ELU'(pre_eh1)` |
+| enc_w1, enc_b1 | weight/bias grads | outer product `enc_in ⊗ d_pre_eh1` (input layer — no further upstream) |
+
+---
+
+## Roadmap
+
+- [ ] Results: reconstructions and latent-space visualisations (coming after full training run)
+- [ ] BLAS matmul (`cblas_sgemm`) or OpenMP for training throughput
+- [ ] CI with ASAN gate
+
+---
+
+## References
+
+- Kingma & Welling, [*Auto-Encoding Variational Bayes*](https://arxiv.org/abs/1312.6114) (2013)
+- Higgins et al., [*β-VAE*](https://openreview.net/forum?id=Sy2fchgDl) — motivation for KL weighting and annealing
+- LeCun et al., [MNIST database](http://yann.lecun.com/exdb/mnist/)
