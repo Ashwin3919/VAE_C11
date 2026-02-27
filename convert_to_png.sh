@@ -3,10 +3,10 @@
 echo "🖼️  Converting PGM files to PNG format..."
 
 # Create PNG directory if it doesn't exist
-mkdir -p results/png
+mkdir -p results_main/v3/png
 
 # Counter for progress
-total_files=$(ls results/*.pgm 2>/dev/null | wc -l)
+total_files=$(ls results_main/v3/*.pgm 2>/dev/null | wc -l)
 current=0
 
 if [ "$total_files" -eq 0 ]; then
@@ -18,11 +18,11 @@ echo "Found $total_files PGM files to convert"
 echo ""
 
 # Convert all PGM files to PNG
-for pgm_file in results/*.pgm; do
+for pgm_file in results_main/v3/*.pgm; do
     if [ -f "$pgm_file" ]; then
         # Get filename without path and extension
         filename=$(basename "$pgm_file" .pgm)
-        png_file="results/png/${filename}.png"
+        png_file="results_main/v3/png/${filename}.png"
         
         # Convert using modern ImageMagick command
         magick "$pgm_file" "$png_file"

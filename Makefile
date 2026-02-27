@@ -47,6 +47,7 @@ CORE_SRCS = \
 MAIN_SRC = $(SRC)/main.c
 
 # ── v1: small model, binary digits (0-1) ──────────────────────────────
+mini: all
 all: $(EXE_DIR)/vae_model $(EXE_DIR)/view_results
 
 $(EXE_DIR)/vae_model: $(MAIN_SRC) $(CORE_SRCS) $(HEADERS)
@@ -54,7 +55,8 @@ $(EXE_DIR)/vae_model: $(MAIN_SRC) $(CORE_SRCS) $(HEADERS)
 	$(CC) $(CFLAGS) $(IFLAGS) -o $@ $(MAIN_SRC) $(CORE_SRCS) $(LIBS)
 
 # ── v2: medium model, binary digits (0-1) ─────────────────────────────
-v2 mid: $(MAIN_SRC) $(CORE_SRCS) $(HEADERS)
+v2: mid
+mid: $(MAIN_SRC) $(CORE_SRCS) $(HEADERS)
 	@mkdir -p $(EXE_DIR)
 	$(CC) $(CFLAGS) $(IFLAGS) -DVERSION_V2 -o $(EXE_DIR)/vae_model \
 	    $(MAIN_SRC) $(CORE_SRCS) $(LIBS)
@@ -146,6 +148,6 @@ tsan: $(TEST_SRCS) $(HEADERS)
 
 # ── clean ──────────────────────────────────────────────────────────────
 clean:
-	rm -rf $(EXE_DIR) *.o *.pgm
+	rm -rf $(EXE_DIR) *.o *.pgm results_main models
 
-.PHONY: all v2 mid full debug asan omp omp-mini omp-mid omp-full test tsan clean
+.PHONY: all mini v2 mid full debug asan omp omp-mini omp-mid omp-full test tsan clean

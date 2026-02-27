@@ -2,6 +2,9 @@
 
 A ground-up implementation of a **Conditional Variational Autoencoder (CVAE)** in pure C11, trained on MNIST, with zero external dependencies beyond `libc` and `libm`.
 
+**Author:** : Ashwin Shirke
+
+
 ---
 
 ## Motivation
@@ -49,21 +52,23 @@ Checkpoints are saved to `models/vae_vN.bin` every `save_every` epochs and reloa
 
 | Target | Binary | Model | Digits | Params | Epochs |
 |---|---|---|---|---|---|
-| `make` | `exe/vae_model` | v1 Mini | 0 & 1 | ~385K | 300 |
-| `make mid` | `exe/vae_model` | v2 Mid | 0 & 1 | ~1.1M | 400 |
-| `make full` | `exe/vae_model` | v3 Full | 0 – 9 | ~1.7M | 800 |
+| `make` / `make all` | `exe/vae_model` | v1 Mini | 0 & 1 | ~385K | 300 |
+| `make mid` / `v2` | `exe/vae_model` | v2 Mid | 0 & 1 | ~934K | 400 |
+| `make full` | `exe/vae_model` | v3 Full | 0 – 9 | ~1.3M | 800 |
 | `make omp-mini` | `exe/vae_model_omp_mini` | v1 + OMP | 0 & 1 | ~385K | — |
-| `make omp-mid` | `exe/vae_model_omp_mid` | v2 + OMP | 0 & 1 | ~1.1M | — |
-| `make omp-full` | `exe/vae_model_omp_full` | v3 + OMP | 0 – 9 | ~1.7M | — |
+| `make omp-mid` | `exe/vae_model_omp_mid` | v2 + OMP | 0 & 1 | ~934K | — |
+| `make omp-full` | `exe/vae_model_omp_full` | v3 + OMP | 0 – 9 | ~1.3M | — |
 | `make omp` | all three above | — | — | — | — |
 | `make debug` | `exe/vae_model_debug` | v1 | 0 & 1 | ~385K | — |
 | `make asan` | `exe/vae_model_asan` | v1 | 0 & 1 | ~385K | — |
 | `make test` | `exe/run_tests` | — | — | — | — |
+| `make tsan` | `exe/run_tests_tsan` | — | — | — | — |
 | `make clean` | — | — | — | — | — |
 
 The `omp-mini/mid/full` targets build with `-Xclang -fopenmp` (Apple Clang) or `-fopenmp` (GCC on Linux), activating `#pragma omp parallel for` inside `linear_batch`. All three variants exist so you can compare per-model throughput improvement directly. Requires `libomp` — on macOS: `brew install libomp`.
 The `debug` target disables optimisation and enables `-g` for clean stack traces.
 The `asan` target builds with `-fsanitize=address,undefined` for catching memory errors and undefined behaviour.
+The `tsan` target builds with `-fsanitize=thread` to validate OpenMP paths for data races.
 
 ---
 
@@ -387,18 +392,16 @@ Backward sections (innermost to outermost):
 | enc_h1 (into ELU) | upstream signal | `enc_w2ᵀ · d_pre_eh2`, then `· ELU'(pre_eh1)` |
 | enc_w1, enc_b1 | weight/bias grads | outer product `enc_in ⊗ d_pre_eh1` (input layer — no further upstream) |
 
----
 
-## Roadmap
-
-- [ ] Results: reconstructions and latent-space visualisations (coming after full training run)
-- [x] OpenMP `parallel for` in `linear_batch` — `make omp` target (`lib_matmul` branch)
-- [ ] CI with ASAN gate
-
----
 
 ## References
 
 - Kingma & Welling, [*Auto-Encoding Variational Bayes*](https://arxiv.org/abs/1312.6114) (2013)
 - Higgins et al., [*β-VAE*](https://openreview.net/forum?id=Sy2fchgDl) — motivation for KL weighting and annealing
 - LeCun et al., [MNIST database](http://yann.lecun.com/exdb/mnist/)
+
+---
+
+## Contributing
+
+If you have recommendations or have spotted bugs, please don't hesitate to raise a pull request. See [CONTRIBUTING.md] for more details.

@@ -14,6 +14,11 @@
 #include <string.h>
 #include <time.h>
 
+#ifdef _OPENMP
+#include <omp.h>
+#endif
+
+
 /* ------------------------------------------------------------------ */
 /* Dataset                                                              */
 /* ------------------------------------------------------------------ */
@@ -86,7 +91,11 @@ void train(VAE *m, Dataset *ds) {
   int patience = 0;
 
   for (int epoch = 0; epoch < c->epochs; epoch++) {
+#ifdef _OPENMP
+    double t0 = omp_get_wtime();
+#else
     clock_t t0 = clock();
+#endif
 
     /* Learning rate: linear warmup then cosine decay, floor 5% */
     float lr;
@@ -180,7 +189,13 @@ void train(VAE *m, Dataset *ds) {
       }
     }
 
-    double sps = train_count / ((double)(clock() - t0) / CLOCKS_PER_SEC);
+#ifdef _OPENMP
+    double dt = omp_get_wtime() - t0;
+#else
+    double dt = (double)(clock() - t0) / CLOCKS_PER_SEC;
+#endif
+    double sps = dt > 0 ? (double)train_count / dt : 0;
+
     if (epoch % 10 == 0 || epoch < 10)
       printf("[EPOCH %3d] train=%.4f  val=%.4f  best=%.4f"
              "  beta=%.5f  lr=%.5f  %.0f img/s\n",

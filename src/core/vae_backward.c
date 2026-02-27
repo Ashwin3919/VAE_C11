@@ -21,6 +21,10 @@
 
 #include <string.h>
 
+#ifdef _OPENMP
+#include <omp.h>
+#endif
+
 /* ------------------------------------------------------------------ */
 /* Forward declarations for helpers defined in vae_forward.c           */
 /* ------------------------------------------------------------------ */
@@ -63,17 +67,20 @@ void vae_backward(VAE *m, float **xs, const int *labels, int bsz, float beta) {
   const int enc_in = c->enc_in, dec_in = c->dec_in;
   const float scale = 1.0f / (float)bsz;
 
-  /* Slab scratch aliases (single-sample, reused per loop iteration) */
-  float *d_out = m->sc_out;
-  float *d_dh2 = m->sc_dh2;
-  float *d_dh1 = m->sc_dh1;
-  float *d_z = m->sc_z;
-  float *d_mu = m->sc_mu;
-  float *d_lv = m->sc_lv;
-  float *d_eh2 = m->sc_eh2;
-  float *d_eh1 = m->sc_eh1;
-
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static)
+#endif
   for (int s = 0; s < bsz; s++) {
+    /* Thread-local scratch aliases (one set per thread) */
+    float d_out[IMAGE_SIZE];
+    float d_dh2[320]; /* Max h2 across v1/v2/v3 is 320 */
+    float d_dh1[640]; /* Max h1 across v1/v2/v3 is 640 */
+    float d_z[128];   /* Max latent is 128 */
+    float d_mu[128];
+    float d_lv[128];
+    float d_eh2[320];
+    float d_eh1[640];
+
     const float *x = xs[s];
     const float *out_s = m->output + (size_t)s * IMAGE_SIZE;
     const float *dec_h2s = m->dec_h2 + (size_t)s * h2;
@@ -106,11 +113,17 @@ void vae_backward(VAE *m, float **xs, const int *labels, int bsz, float beta) {
      */
     for (int i = 0; i < IMAGE_SIZE; i++) {
       d_out[i] = (out_s[i] - x[i]) / ((float)IMAGE_SIZE * (float)bsz);
+#ifdef _OPENMP
+#pragma omp atomic
+#endif
       m->db3[i] += d_out[i];
     }
     memset(d_dh2, 0, (size_t)h2 * sizeof(float));
     for (int i = 0; i < h2; i++)
       for (int j = 0; j < IMAGE_SIZE; j++) {
+#ifdef _OPENMP
+#pragma omp atomic
+#endif
         m->dw3[(size_t)i * IMAGE_SIZE + j] += dec_h2s[i] * d_out[j];
         d_dh2[i] += m->dec_w3[(size_t)i * IMAGE_SIZE + j] * d_out[j];
       }
@@ -127,10 +140,17 @@ void vae_backward(VAE *m, float **xs, const int *labels, int bsz, float beta) {
     for (int i = 0; i < h2; i++)
       d_dh2[i] *= vae_elu_d(pdh2_s[i]);
     memset(d_dh1, 0, (size_t)h1 * sizeof(float));
-    for (int j = 0; j < h2; j++)
+    for (int j = 0; j < h2; j++) {
+#ifdef _OPENMP
+#pragma omp atomic
+#endif
       m->db2[j] += d_dh2[j];
+    }
     for (int i = 0; i < h1; i++)
       for (int j = 0; j < h2; j++) {
+#ifdef _OPENMP
+#pragma omp atomic
+#endif
         m->dw2[(size_t)i * h2 + j] += dec_h1s[i] * d_dh2[j];
         d_dh1[i] += m->dec_w2[(size_t)i * h2 + j] * d_dh2[j];
       }
@@ -147,11 +167,18 @@ void vae_backward(VAE *m, float **xs, const int *labels, int bsz, float beta) {
      */
     for (int i = 0; i < h1; i++)
       d_dh1[i] *= vae_elu_d(pdh1_s[i]);
-    for (int j = 0; j < h1; j++)
+    for (int j = 0; j < h1; j++) {
+#ifdef _OPENMP
+#pragma omp atomic
+#endif
       m->db1[j] += d_dh1[j];
+    }
     memset(d_z, 0, (size_t)latent * sizeof(float));
     for (int i = 0; i < dec_in; i++)
       for (int j = 0; j < h1; j++) {
+#ifdef _OPENMP
+#pragma omp atomic
+#endif
         m->dw1[(size_t)i * h1 + j] += dec_in_s[i] * d_dh1[j];
         if (i < latent)
           d_z[i] += m->dec_w1[(size_t)i * h1 + j] * d_dh1[j];
@@ -176,7 +203,13 @@ void vae_backward(VAE *m, float **xs, const int *labels, int bsz, float beta) {
       d_mu[i] = d_z[i] + (beta * mu_s[i] / (float)latent) * scale;
       d_lv[i] = d_z[i] * 0.5f * sig * eps_s[i] +
                 (beta * 0.5f * (expf(lv_s[i]) - 1.0f) / (float)latent) * scale;
+#ifdef _OPENMP
+#pragma omp atomic
+#endif
       m->d_mub[i] += d_mu[i];
+#ifdef _OPENMP
+#pragma omp atomic
+#endif
       m->d_lvb[i] += d_lv[i];
     }
 
@@ -190,7 +223,13 @@ void vae_backward(VAE *m, float **xs, const int *labels, int bsz, float beta) {
     memset(d_eh2, 0, (size_t)h2 * sizeof(float));
     for (int i = 0; i < h2; i++)
       for (int j = 0; j < latent; j++) {
+#ifdef _OPENMP
+#pragma omp atomic
+#endif
         m->d_muw[(size_t)i * latent + j] += enc_h2s[i] * d_mu[j];
+#ifdef _OPENMP
+#pragma omp atomic
+#endif
         m->d_lvw[(size_t)i * latent + j] += enc_h2s[i] * d_lv[j];
         d_eh2[i] += m->mu_w[(size_t)i * latent + j] * d_mu[j] +
                     m->lv_w[(size_t)i * latent + j] * d_lv[j];
@@ -206,10 +245,17 @@ void vae_backward(VAE *m, float **xs, const int *labels, int bsz, float beta) {
     for (int i = 0; i < h2; i++)
       d_eh2[i] *= vae_elu_d(peh2_s[i]);
     memset(d_eh1, 0, (size_t)h1 * sizeof(float));
-    for (int j = 0; j < h2; j++)
+    for (int j = 0; j < h2; j++) {
+#ifdef _OPENMP
+#pragma omp atomic
+#endif
       m->d_eb2[j] += d_eh2[j];
+    }
     for (int i = 0; i < h1; i++)
       for (int j = 0; j < h2; j++) {
+#ifdef _OPENMP
+#pragma omp atomic
+#endif
         m->d_ew2[(size_t)i * h2 + j] += enc_h1s[i] * d_eh2[j];
         d_eh1[i] += m->enc_w2[(size_t)i * h2 + j] * d_eh2[j];
       }
@@ -223,10 +269,18 @@ void vae_backward(VAE *m, float **xs, const int *labels, int bsz, float beta) {
      */
     for (int i = 0; i < h1; i++)
       d_eh1[i] *= vae_elu_d(peh1_s[i]);
-    for (int j = 0; j < h1; j++)
+    for (int j = 0; j < h1; j++) {
+#ifdef _OPENMP
+#pragma omp atomic
+#endif
       m->d_eb1[j] += d_eh1[j];
+    }
     for (int i = 0; i < enc_in; i++)
-      for (int j = 0; j < h1; j++)
+      for (int j = 0; j < h1; j++) {
+#ifdef _OPENMP
+#pragma omp atomic
+#endif
         m->d_ew1[(size_t)i * h1 + j] += enc_in_s[i] * d_eh1[j];
+      }
   }
 }

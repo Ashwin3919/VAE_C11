@@ -17,6 +17,10 @@
 
 #include "vae_internal.h" /* linear_single, one_hot — defined in vae_forward.c */
 
+#ifdef _OPENMP
+#include <omp.h>
+#endif
+
 /* ------------------------------------------------------------------ */
 /* Loss                                                                 */
 /* ------------------------------------------------------------------ */
@@ -38,6 +42,9 @@
 float vae_loss(VAE *m, float **xs, int bsz, float beta) {
   const int latent = m->cfg.latent;
   float total = 0.0f;
+#ifdef _OPENMP
+#pragma omp parallel for reduction(+ : total) schedule(static)
+#endif
   for (int s = 0; s < bsz; s++) {
     const float *x = xs[s];
     const float *out = m->output + (size_t)s * IMAGE_SIZE;
