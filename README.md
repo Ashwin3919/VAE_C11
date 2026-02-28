@@ -120,8 +120,8 @@ This is a **Conditional VAE (CVAE)**. The digit label is one-hot encoded and con
 ```
                 ┌──────────────────── ENCODER ──────────────────────┐
                 │                                                   │
- image (784) ─→ │  Linear(enc_in→h1, ELU)  →  Linear(h1→h2, ELU)    │ ─→ μ  [latent]
- label (nc)  ─→ │                              Linear(h2→latent)    │ ─→ log σ²  [latent]
+ image (784) →  │  Linear(enc_in→h1, ELU)  →  Linear(h1→h2, ELU)    │ → μ  [latent]
+ label (nc)  →  │                              Linear(h2→latent)    │ → log σ²  [latent]
                 └───────────────────────────────────────────────────┘
 
                       ┌─── REPARAMETERISATION ───────┐
@@ -130,8 +130,8 @@ This is a **Conditional VAE (CVAE)**. The digit label is one-hot encoded and con
 
                 ┌──────────────────── DECODER ───────────────────────┐
                 │                                                    │
- z (latent)  ─→ │  Linear(dec_in→h1, ELU) →  Linear(h1→h2, ELU)      │ ─→ x̂  [784]
- label (nc)  ─→ │                            Linear(h2→784, Sigmoid) │
+ z (latent)  →  │  Linear(dec_in→h1, ELU) →  Linear(h1→h2, ELU)      │ → x̂  [784]
+ label (nc)  →  │                            Linear(h2→784, Sigmoid) │
                 └────────────────────────────────────────────────────┘
 ```
 
