@@ -1,10 +1,25 @@
-# Generated images
+# ─── MNIST Dataset (do NOT push – download via download_mnist.sh) ───
+data/
+
+# ─── Trained model weights ───────────────────────────────────────────
+models/
+
+# ─── Archives ───────────────────────────────────────────────────────
+*.tar
+*.tar.gz
+*.zip
+
+# ─── Generated images (intermediate / raw outputs) ──────────────────
 *.pgm
 *.jpg
-*.png
 *.bmp
+# PNG outputs inside results_main are intentionally kept for showcase
+# Uncomment the line below if you want to exclude them as well:
+# results_main/**/*.png
 
-# Compiled binaries
+# ─── Compiled binaries ──────────────────────────────────────────────
+vae_model
+view_results
 diffusion_model
 diffusion_model_v2
 diffusion_model_v3
@@ -12,14 +27,21 @@ diffusion_model_v3_2
 diffusion_model_*
 view_images
 view_training_data
+exe/
 
-# Build artifacts
+# ─── Debug symbols (macOS dSYM bundles) ─────────────────────────────
+*.dSYM/
+
+# ─── Scratch / discarded work ────────────────────────────────────────
+trash/
+
+# ─── Build artifacts ─────────────────────────────────────────────────
 *.o
 *.a
 *.so
 *.dylib
 
-# macOS files
+# ─── macOS files ────────────────────────────────────────────────────
 .DS_Store
 .DS_Store?
 ._*
@@ -28,17 +50,17 @@ view_training_data
 ehthumbs.db
 Thumbs.db
 
-# Editor files
+# ─── Editor files ────────────────────────────────────────────────────
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
 
-# Logs
+# ─── Logs & debug ────────────────────────────────────────────────────
 *.log
 debug.txt
 
-# Temporary files
+# ─── Temporary files ─────────────────────────────────────────────────
 temp_*
-tmp_* 
+tmp_*

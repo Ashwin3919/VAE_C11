@@ -1,0 +1,21 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  test:
+    name: Build & Test (Ubuntu)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y gcc libgomp1
+
+      - name: Run test suite
+        run: make test LIBOMP_CFLAGS=-fopenmp LIBOMP_LIBS=-lgomp

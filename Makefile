@@ -1,215 +1,153 @@
-# Hybrid MPI + OpenMP VAE Makefile
-# Supports 4 modes: sequential, OpenMP-only, MPI-only, hybrid
+CC      = gcc
+CFLAGS  = -Wall -Wextra -O3 -std=c11 -march=native \
+          -ffast-math -funroll-loops -ftree-vectorize \
+          -flto -fomit-frame-pointer
+LIBS    = -lm
 
-# Compilation options - can be overridden via command line
-USE_MPI ?= 1
-USE_OPENMP ?= 1
+# ── OpenMP (Apple Clang requires explicit libomp from Homebrew) ────────
+# Override on Linux: make omp-mini LIBOMP_CFLAGS=-fopenmp LIBOMP_LIBS=-lgomp
+LIBOMP_PREFIX ?= $(shell brew --prefix libomp 2>/dev/null)
+LIBOMP_CFLAGS  = -Xclang -fopenmp -I$(LIBOMP_PREFIX)/include
+LIBOMP_LIBS    = -L$(LIBOMP_PREFIX)/lib -lomp
 
-# Base compiler and flags
-# On macOS, use gcc-12 for OpenMP support, fallback to clang for non-OpenMP
-BASE_CC = gcc
-OPENMP_CC = gcc-12
-CFLAGS = -Wall -Wextra -O3 -std=c99 -march=native -ffast-math
-LIBS = -lm
+# ── directories ────────────────────────────────────────────────────────
+EXE_DIR = exe
+INC     = include
+SRC     = src
+TESTS   = tests
 
-# Detect if we're on macOS and adjust accordingly
-UNAME_S := $(shell uname -s)
-ifeq ($(UNAME_S),Darwin)
-    # Check if gcc-12 is available for OpenMP
-    GCC12_AVAILABLE := $(shell which gcc-12 2>/dev/null)
-    ifneq ($(GCC12_AVAILABLE),)
-        OPENMP_CC = gcc-12
-    else
-        # Check for gcc-11, gcc-10, etc.
-        GCC11_AVAILABLE := $(shell which gcc-11 2>/dev/null)
-        ifneq ($(GCC11_AVAILABLE),)
-            OPENMP_CC = gcc-11
-        else
-            # Fallback: try to use clang with libomp (if installed via homebrew)
-            OPENMP_CC = clang
-            LIBOMP_PREFIX := $(shell brew --prefix libomp 2>/dev/null)
-            ifneq ($(LIBOMP_PREFIX),)
-                OPENMP_FLAGS = -Xpreprocessor -fopenmp -I$(LIBOMP_PREFIX)/include
-                OPENMP_LIBS = -L$(LIBOMP_PREFIX)/lib -lomp
-            else
-                OPENMP_FLAGS = -Xpreprocessor -fopenmp
-                OPENMP_LIBS = -lomp
-            endif
-        endif
-    endif
-endif
+# ── include flags ──────────────────────────────────────────────────────
+IFLAGS  = -I$(INC)
+TIFLAGS = -I$(INC) -I$(TESTS)
 
-# Conditional compiler and flag selection
-ifeq ($(USE_MPI), 1)
-    CC = mpicc
-    CFLAGS += -DUSE_MPI=1
-    ifeq ($(USE_OPENMP), 1)
-        # Hybrid MPI + OpenMP mode
-        ifdef OPENMP_FLAGS
-            CFLAGS += $(OPENMP_FLAGS) -DUSE_OPENMP=1
-            ifdef OPENMP_LIBS
-                LIBS += $(OPENMP_LIBS)
-            endif
-        else
-            CFLAGS += -fopenmp -DUSE_OPENMP=1
-            LIBS += -lgomp
-        endif
-        MODE = hybrid
-    else
-        # MPI only mode
-        CFLAGS += -DUSE_OPENMP=0
-        MODE = mpi-only
-    endif
-else
-    CFLAGS += -DUSE_MPI=0
-    ifeq ($(USE_OPENMP), 1)
-        # OpenMP only mode
-        CC = $(OPENMP_CC)
-        ifdef OPENMP_FLAGS
-            CFLAGS += $(OPENMP_FLAGS) -DUSE_OPENMP=1
-            ifdef OPENMP_LIBS
-                LIBS += $(OPENMP_LIBS)
-            endif
-        else
-            CFLAGS += -fopenmp -DUSE_OPENMP=1
-            LIBS += -lgomp
-        endif
-        MODE = openmp-only
-    else
-        # Sequential mode
-        CC = $(BASE_CC)
-        CFLAGS += -DUSE_OPENMP=0
-        MODE = sequential
-    endif
-endif
+# ── public headers ─────────────────────────────────────────────────────
+# Every target lists $(HEADERS) as a prerequisite.  Any header change
+# forces a full rebuild of every binary that transitively includes it,
+# preventing stale-object bugs without requiring per-TU dependency files.
+HEADERS = $(wildcard $(INC)/*.h)
 
-# Targets
-all: vae_model view_results
-	@echo "✅ Built VAE in $(MODE) mode"
+# ── core implementation files (shared by all binary targets and tests) ─
+# vae_model.c  : slab lifecycle only (create_vae / free_vae)
+# vae_forward.c: encoder + decoder forward pass
+# vae_backward.c: gradient accumulation
+# vae_loss.c   : ELBO loss + Adam update + vae_decode
+CORE_SRCS = \
+    $(SRC)/config/vae_config.c       \
+    $(SRC)/rng/vae_rng.c             \
+    $(SRC)/optimizer/vae_optimizer.c \
+    $(SRC)/core/vae_model.c          \
+    $(SRC)/core/vae_forward.c        \
+    $(SRC)/core/vae_backward.c       \
+    $(SRC)/core/vae_loss.c           \
+    $(SRC)/io/vae_io.c               \
+    $(SRC)/generate/vae_generate.c   \
+    $(SRC)/train/vae_train.c         \
+    $(SRC)/mnist_loader.c
 
-# Main VAE model - hybrid parallel
-vae_model: vae_model.c mnist_loader.c
-	@echo "🔨 Compiling VAE in $(MODE) mode..."
-	$(CC) $(CFLAGS) -o $@ vae_model.c $(LIBS)
+MAIN_SRC = $(SRC)/main.c
 
-# Results viewer
-view_results: view_results.c
-	$(BASE_CC) -Wall -Wextra -O2 -o $@ view_results.c
+# ── v1: small model, binary digits (0-1) ──────────────────────────────
+mini: all
+all: $(EXE_DIR)/vae_model $(EXE_DIR)/view_results
 
-# Specific build targets for different modes
-sequential:
-	@echo "🚀 Building sequential version..."
-	$(MAKE) clean
-	$(MAKE) all USE_MPI=0 USE_OPENMP=0
+$(EXE_DIR)/vae_model: $(MAIN_SRC) $(CORE_SRCS) $(HEADERS)
+	@mkdir -p $(EXE_DIR)
+	$(CC) $(CFLAGS) $(IFLAGS) -o $@ $(MAIN_SRC) $(CORE_SRCS) $(LIBS)
 
-openmp:
-	@echo "🧮 Building OpenMP version..."
-	$(MAKE) clean
-	$(MAKE) all USE_MPI=0 USE_OPENMP=1
+# ── v2: medium model, binary digits (0-1) ─────────────────────────────
+v2: mid
+mid: $(MAIN_SRC) $(CORE_SRCS) $(HEADERS)
+	@mkdir -p $(EXE_DIR)
+	$(CC) $(CFLAGS) $(IFLAGS) -DVERSION_V2 -o $(EXE_DIR)/vae_model \
+	    $(MAIN_SRC) $(CORE_SRCS) $(LIBS)
 
-mpi:
-	@echo "🌐 Building MPI version..."
-	$(MAKE) clean
-	$(MAKE) all USE_MPI=1 USE_OPENMP=0
+# ── v3: large model, full MNIST (0-9) ─────────────────────────────────
+# Note: -DFULL_MNIST removed; digit mode is now a runtime flag (--full-mnist)
+full: $(MAIN_SRC) $(CORE_SRCS) $(HEADERS)
+	@mkdir -p $(EXE_DIR)
+	$(CC) $(CFLAGS) $(IFLAGS) -DVERSION_V3 \
+	    -o $(EXE_DIR)/vae_model $(MAIN_SRC) $(CORE_SRCS) $(LIBS)
 
-hybrid:
-	@echo "⚡ Building hybrid MPI+OpenMP version..."
-	$(MAKE) clean
-	$(MAKE) all USE_MPI=1 USE_OPENMP=1
+# ── debug build ────────────────────────────────────────────────────────
+debug: $(MAIN_SRC) $(CORE_SRCS) $(HEADERS)
+	@mkdir -p $(EXE_DIR)
+	$(CC) -g -O0 -std=c11 -DDEBUG $(IFLAGS) \
+	    -o $(EXE_DIR)/vae_model_debug $(MAIN_SRC) $(CORE_SRCS) $(LIBS)
 
-# Parallelization parameters - optimized for your 8-core system
-OPENMP_THREADS = 8
-MPI_PROCESSES = 8
-HYBRID_MPI_PROCESSES = 2
-HYBRID_OPENMP_THREADS = 4
+# ── sanitizer build (AddressSanitizer + UBSan) ─────────────────────────
+# Run with:  make asan && ./exe/vae_model_asan
+# Catches: heap/stack overflows, use-after-free, signed overflow, null deref.
+asan: $(MAIN_SRC) $(CORE_SRCS) $(HEADERS)
+	@mkdir -p $(EXE_DIR)
+	$(CC) -g -O1 -std=c11 -fsanitize=address,undefined \
+	    -fno-omit-frame-pointer $(IFLAGS) \
+	    -o $(EXE_DIR)/vae_model_asan $(MAIN_SRC) $(CORE_SRCS) $(LIBS)
 
-# Performance testing targets with specific thread/process counts
-test-sequential:
-	$(MAKE) sequential && time ./vae_model
+# ── OpenMP builds — activates #pragma omp parallel for in linear_batch.
+# Three variants so training throughput can be compared across model sizes.
+# Usage: make omp        (builds all three)
+#        make omp-mini / omp-mid / omp-full   (individual)
+omp-mini: $(MAIN_SRC) $(CORE_SRCS) $(HEADERS)
+	@mkdir -p $(EXE_DIR)
+	$(CC) $(CFLAGS) $(IFLAGS) $(LIBOMP_CFLAGS) \
+	    -o $(EXE_DIR)/vae_model_omp_mini $(MAIN_SRC) $(CORE_SRCS) $(LIBS) $(LIBOMP_LIBS)
 
-test-openmp:
-	$(MAKE) openmp && OMP_NUM_THREADS=$(OPENMP_THREADS) time ./vae_model
+omp-mid: $(MAIN_SRC) $(CORE_SRCS) $(HEADERS)
+	@mkdir -p $(EXE_DIR)
+	$(CC) $(CFLAGS) $(IFLAGS) $(LIBOMP_CFLAGS) -DVERSION_V2 \
+	    -o $(EXE_DIR)/vae_model_omp_mid $(MAIN_SRC) $(CORE_SRCS) $(LIBS) $(LIBOMP_LIBS)
 
-test-mpi:
-	$(MAKE) mpi && time mpirun -np $(MPI_PROCESSES) ./vae_model
+omp-full: $(MAIN_SRC) $(CORE_SRCS) $(HEADERS)
+	@mkdir -p $(EXE_DIR)
+	$(CC) $(CFLAGS) $(IFLAGS) $(LIBOMP_CFLAGS) -DVERSION_V3 \
+	    -o $(EXE_DIR)/vae_model_omp_full $(MAIN_SRC) $(CORE_SRCS) $(LIBS) $(LIBOMP_LIBS)
 
-test-hybrid:
-	$(MAKE) hybrid && OMP_NUM_THREADS=$(HYBRID_OPENMP_THREADS) time mpirun -np $(HYBRID_MPI_PROCESSES) ./vae_model
+# Convenience alias — builds all three OMP variants at once.
+omp: omp-mini omp-mid omp-full
 
-# Direct run targets (assumes already built)
-run-sequential:
-	@echo "🚀 Running sequential VAE..."
-	./vae_model
+# ── results viewer (standalone, no VAE dependency) ────────────────────
+$(EXE_DIR)/view_results: $(SRC)/view_results.c
+	@mkdir -p $(EXE_DIR)
+	$(CC) $(CFLAGS) -o $@ $^
 
-run-openmp:
-	@echo "🧮 Running OpenMP VAE with $(OPENMP_THREADS) threads..."
-	OMP_NUM_THREADS=$(OPENMP_THREADS) ./vae_model
+# ── test sources (shared between test and tsan targets) ───────────────
+TEST_SRCS = \
+    $(TESTS)/run_tests.c             \
+    $(TESTS)/test_rng.c              \
+    $(TESTS)/test_optimizer.c        \
+    $(TESTS)/test_model.c            \
+    $(TESTS)/test_train.c            \
+    $(SRC)/config/vae_config.c       \
+    $(SRC)/rng/vae_rng.c             \
+    $(SRC)/optimizer/vae_optimizer.c \
+    $(SRC)/core/vae_model.c          \
+    $(SRC)/core/vae_forward.c        \
+    $(SRC)/core/vae_backward.c       \
+    $(SRC)/core/vae_loss.c           \
+    $(SRC)/io/vae_io.c               \
+    $(SRC)/generate/vae_generate.c   \
+    $(SRC)/mnist_loader.c
 
-run-mpi:
-	@echo "🌐 Running MPI VAE with $(MPI_PROCESSES) processes..."
-	mpirun -np $(MPI_PROCESSES) ./vae_model
+# ── unit + integration tests (no MNIST required) ──────────────────────
+# $(HEADERS) is listed as a prerequisite so that any public header change
+# triggers a full test recompile, just as it does for the main binaries.
+test: $(TEST_SRCS) $(HEADERS)
+	@mkdir -p $(EXE_DIR)
+	$(CC) $(CFLAGS) $(TIFLAGS) -o $(EXE_DIR)/run_tests $(TEST_SRCS) $(LIBS)
+	./$(EXE_DIR)/run_tests
 
-run-hybrid:
-	@echo "⚡ Running hybrid VAE with $(HYBRID_MPI_PROCESSES) MPI processes × $(HYBRID_OPENMP_THREADS) OpenMP threads..."
-	OMP_NUM_THREADS=$(HYBRID_OPENMP_THREADS) mpirun -np $(HYBRID_MPI_PROCESSES) ./vae_model
+# ── ThreadSanitizer — validate OMP paths for data races ───────────────
+# Run on Linux with gcc; on macOS clang TSan is also supported.
+# Catches races in: linear_batch parallel for, rng_normal concurrent calls.
+tsan: $(TEST_SRCS) $(HEADERS)
+	@mkdir -p $(EXE_DIR)
+	$(CC) -g -O1 -std=c11 -fsanitize=thread \
+	    -fno-omit-frame-pointer $(TIFLAGS) \
+	    -o $(EXE_DIR)/run_tests_tsan $(TEST_SRCS) $(LIBS)
+	./$(EXE_DIR)/run_tests_tsan
 
-# Configuration targets to adjust parallelism
-config-show:
-	@echo "Current parallelization settings:"
-	@echo "  OpenMP threads: $(OPENMP_THREADS)"
-	@echo "  MPI processes: $(MPI_PROCESSES)"
-	@echo "  Hybrid: $(HYBRID_MPI_PROCESSES) MPI × $(HYBRID_OPENMP_THREADS) OpenMP = $$(( $(HYBRID_MPI_PROCESSES) * $(HYBRID_OPENMP_THREADS) )) total cores"
-	@echo "  System cores: $(shell sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 'unknown')"
-
-# Show current configuration
-info:
-	@echo "Current configuration:"
-	@echo "  USE_MPI=$(USE_MPI)"
-	@echo "  USE_OPENMP=$(USE_OPENMP)"
-	@echo "  Mode: $(MODE)"
-	@echo "  Compiler: $(CC)"
-	@echo "  Flags: $(CFLAGS)"
-	@echo "  Libraries: $(LIBS)"
-
-# Clean rule
+# ── clean ──────────────────────────────────────────────────────────────
 clean:
-	rm -f vae_model view_results *.o *.pgm
-	rm -rf results/
+	rm -rf $(EXE_DIR) *.o *.pgm results_main models
 
-# Help target
-help:
-	@echo "VAE Hybrid Parallelization Build System"
-	@echo "======================================="
-	@echo ""
-	@echo "Targets:"
-	@echo "  all        - Build with current settings"
-	@echo "  sequential - Build sequential version"
-	@echo "  openmp     - Build OpenMP-only version"
-	@echo "  mpi        - Build MPI-only version"
-	@echo "  hybrid     - Build hybrid MPI+OpenMP version"
-	@echo ""
-	@echo "Testing (Build + Run):"
-	@echo "  test-sequential - Build and run sequential"
-	@echo "  test-openmp     - Build and run OpenMP ($(OPENMP_THREADS) threads)"
-	@echo "  test-mpi        - Build and run MPI ($(MPI_PROCESSES) processes)"
-	@echo "  test-hybrid     - Build and run hybrid ($(HYBRID_MPI_PROCESSES) MPI × $(HYBRID_OPENMP_THREADS) OpenMP)"
-	@echo ""
-	@echo "Running (assumes built):"
-	@echo "  run-sequential  - Run sequential version"
-	@echo "  run-openmp      - Run OpenMP version ($(OPENMP_THREADS) threads)"
-	@echo "  run-mpi         - Run MPI version ($(MPI_PROCESSES) processes)"
-	@echo "  run-hybrid      - Run hybrid version ($(HYBRID_MPI_PROCESSES) MPI × $(HYBRID_OPENMP_THREADS) OpenMP)"
-	@echo ""
-	@echo "Utilities:"
-	@echo "  config-show     - Show parallelization settings"
-	@echo "  info            - Show current build configuration"
-	@echo "  clean           - Remove built files"
-	@echo "  help            - Show this help"
-	@echo ""
-	@echo "Manual override:"
-	@echo "  make USE_MPI=1 USE_OPENMP=1  # Hybrid mode"
-	@echo "  make USE_MPI=0 USE_OPENMP=1  # OpenMP only"
-	@echo "  make USE_MPI=1 USE_OPENMP=0  # MPI only"
-	@echo "  make USE_MPI=0 USE_OPENMP=0  # Sequential"
-
-.PHONY: all sequential openmp mpi hybrid test-sequential test-openmp test-mpi test-hybrid run-sequential run-openmp run-mpi run-hybrid config-show info clean help 
+.PHONY: all mini v2 mid full debug asan omp omp-mini omp-mid omp-full test tsan clean
