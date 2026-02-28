@@ -32,11 +32,9 @@ Parallelization was implemented using **OpenMP** targeting the most compute-inte
 
 ## Visual Samples
 
-The `results_main/` directory contains generated PGM images for each model version. These include:
-- Reconstructions of input digits.
-- Conditional generations (asking for a specific digit).
-- Latent space interpolations (watching one digit morph into another).
+The `results_example/` directory contains examples of generated PGM images from the mid model (update coming soon!).
 
+![Example Output](results_example/example.png)
 ## Conclusion
 
 This project was a pursuit of understanding generative models at the **system level**. The goal was not to achieve the state-of-the-art in MNIST generation, but to build every component—from the memory slab to the gradient chain—with absolute clarity. The transition from a 385K parameter binary classifier to a 1.7M parameter generative engine highlights the fundamental relationship between model capacity, training efficiency, and low-level system design.
