@@ -20,11 +20,6 @@ models/
 # ─── Compiled binaries ──────────────────────────────────────────────
 vae_model
 view_results
-diffusion_model
-diffusion_model_v2
-diffusion_model_v3
-diffusion_model_v3_2
-diffusion_model_*
 view_images
 view_training_data
 exe/
