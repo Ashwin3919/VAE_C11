@@ -4,6 +4,8 @@ A ground-up implementation of a **Conditional Variational Autoencoder (CVAE)** i
 
 **Author:** : Ashwin Shirke
 
+![Example Output](results_example/example.png)
+
 
 ---
 
