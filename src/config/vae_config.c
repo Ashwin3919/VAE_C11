@@ -15,10 +15,10 @@ VAEConfig vae_config_v1(void) {
   c.batch_size = 64;
   c.epochs = 300;
   c.lr = 0.001f;
-  c.beta_start = 0.00001f;
-  c.beta_end = 0.2f;    /* was 0.0005 — too small to regularise latent space */
+  c.beta_start = 0.001f;  /* start higher — reduces initial jump from x2000 to x50 */
+  c.beta_end = 0.05f;     /* 0.2 over-regularised; 0.05 balances recon vs KL for MNIST */
   c.grad_clip = GRAD_CLIP_DEFAULT;
-  c.beta_warmup = 50;   /* ramp starts at epoch 50 */
+  c.beta_warmup = 50;
   c.beta_anneal = 100;  /* ramp finishes at epoch 150 */
   c.save_every = 50;
   c.lr_warmup_epochs = 30;
@@ -51,8 +51,8 @@ VAEConfig vae_config_v3(void) {
   c.lr = 0.0001f;       /* v3 has 5x more batches/epoch than v1 (843 vs 178).
                            Model converges by epoch 2 (~1700 steps). LR above
                            0.0001 disrupts a nearly-converged model. */
-  c.beta_start = 0.00001f;
-  c.beta_end = 0.2f;
+  c.beta_start = 0.001f;  /* same logic as v1 */
+  c.beta_end = 0.05f;
   c.grad_clip = GRAD_CLIP_DEFAULT;
   c.beta_warmup = 50;
   c.beta_anneal = 100;  /* ramp finishes at epoch 150 */
