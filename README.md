@@ -4,7 +4,11 @@ A ground-up implementation of a **Conditional Variational Autoencoder (CVAE)** i
 
 **Author:** Ashwin Shirke
 
-![Example Output](results_example/example.png)
+**All 10 digits (v3):**
+![All digits](results_example/example.png)
+
+**Digits 0 & 1 (v1):**
+![Digits 0 and 1](results_example/v1.png)
 
 ---
 
