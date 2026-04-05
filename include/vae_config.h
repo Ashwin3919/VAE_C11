@@ -40,8 +40,7 @@ typedef struct {
 } VAEConfig;
 
 /* Preset constructors */
-VAEConfig vae_config_v1(void); /* 784→256→128→z32   binary digits  */
-VAEConfig vae_config_v2(void); /* 784→512→256→z64   binary digits  */
-VAEConfig vae_config_v3(void); /* 784→640→320→z128  all 10 digits  */
+VAEConfig vae_config_v1(void); /* 784→256→128→z32   digits 0-1     */
+VAEConfig vae_config_v3(void); /* 784→256→128→z64   all 10 digits  */
 
 #endif /* VAE_CONFIG_H */

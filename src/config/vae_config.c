@@ -16,14 +16,15 @@ VAEConfig vae_config_v1(void) {
   c.epochs = 300;
   c.lr = 0.001f;
   c.beta_start = 0.00001f;
-  c.beta_end = 0.0005f;
+  c.beta_end = 0.2f;    /* was 0.0005 — too small to regularise latent space */
   c.grad_clip = GRAD_CLIP_DEFAULT;
-  c.beta_warmup = 100;
-  c.beta_anneal = 150;
+  c.beta_warmup = 50;   /* ramp starts at epoch 50 */
+  c.beta_anneal = 100;  /* ramp finishes at epoch 150 */
   c.save_every = 50;
   c.lr_warmup_epochs = 30;
   c.es_patience = 60;
-  c.es_min_epoch = 150;
+  c.es_min_epoch = 220; /* was 150 — must be > beta_warmup+beta_anneal+buffer so
+                           early stop doesn't trigger on pre-KL best_val */
   c.full_mnist = 0;
   c.version_tag = "v1";
   c.data_dir = "data";
@@ -33,55 +34,32 @@ VAEConfig vae_config_v1(void) {
   return c;
 }
 
-VAEConfig vae_config_v2(void) {
-  VAEConfig c = {0};
-  c.h1 = 512;
-  c.h2 = 256;
-  c.latent = 64;
-  c.num_classes = 2;
-  c.enc_in = IMAGE_SIZE + c.num_classes;
-  c.dec_in = c.latent + c.num_classes;
-  c.batch_size = 64;
-  c.epochs = 400;
-  c.lr = 0.001f;
-  c.beta_start = 0.00001f;
-  c.beta_end = 0.0005f;
-  c.grad_clip = GRAD_CLIP_DEFAULT;
-  c.beta_warmup = 100;
-  c.beta_anneal = 150;
-  c.save_every = 50;
-  c.lr_warmup_epochs = 30;
-  c.es_patience = 60;
-  c.es_min_epoch = 150;
-  c.full_mnist = 0;
-  c.version_tag = "v2";
-  c.data_dir = "data";
-  c.result_dir = "results_main/v2";
-  c.model_dir = "models";
-  c.model_file = "models/vae_v2.bin";
-  return c;
-}
 
 VAEConfig vae_config_v3(void) {
   VAEConfig c = {0};
-  c.h1 = 640;
-  c.h2 = 320;
-  c.latent = 128;
+  /* Same hidden dims as v1 — v1 proved 256/128 is sufficient for MNIST.
+   * Only latent is doubled (32->64) to give room for 5x more classes.
+   * Keeps speed ~1500 img/s and avoids the instability of the old 640/320 arch. */
+  c.h1 = 256;
+  c.h2 = 128;
+  c.latent = 64;
   c.num_classes = 10;
   c.enc_in = IMAGE_SIZE + c.num_classes;
   c.dec_in = c.latent + c.num_classes;
   c.batch_size = 64;
-  c.epochs = 800;
-  c.lr = 0.0008f;
+  c.epochs = 400;
+  c.lr = 0.0001f;       /* v3 has 5x more batches/epoch than v1 (843 vs 178).
+                           Model converges by epoch 2 (~1700 steps). LR above
+                           0.0001 disrupts a nearly-converged model. */
   c.beta_start = 0.00001f;
-  c.beta_end = 0.0005f;
+  c.beta_end = 0.2f;
   c.grad_clip = GRAD_CLIP_DEFAULT;
-  c.beta_warmup = 100;
-  c.beta_anneal = 150;
+  c.beta_warmup = 50;
+  c.beta_anneal = 100;  /* ramp finishes at epoch 150 */
   c.save_every = 50;
-  c.lr_warmup_epochs = 30;
+  c.lr_warmup_epochs = 5;
   c.es_patience = 60;
-  c.es_min_epoch = 150;
+  c.es_min_epoch = 220; /* same logic as v1 */
   c.full_mnist = 1;
   c.version_tag = "v3";
   c.data_dir = "data";

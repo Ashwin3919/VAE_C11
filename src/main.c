@@ -53,8 +53,6 @@ static int parse_digits(const char *arg, int *dst) {
 int main(int argc, char *argv[]) {
 #if defined(VERSION_V3)
   VAEConfig cfg = vae_config_v3();
-#elif defined(VERSION_V2)
-  VAEConfig cfg = vae_config_v2();
 #else
   VAEConfig cfg = vae_config_v1();
 #endif
@@ -77,9 +75,9 @@ int main(int argc, char *argv[]) {
     }
   }
 
-  /* If no CLI override, use config default (v1/v2 → binary, v3 → full) */
+  /* If no CLI override, use config default (v1 → binary, v3 → full) */
   if (n_allowed == 0 && !cfg.full_mnist) {
-    /* binary default for v1/v2: keep only digits 0 and 1 */
+    /* binary default for v1: keep only digits 0 and 1 */
     if (cfg.num_classes == 2) {
       allowed_digits[0] = 0;
       allowed_digits[1] = 1;

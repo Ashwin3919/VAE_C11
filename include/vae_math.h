@@ -15,8 +15,8 @@
 /* PATH_BUF_SIZE lives in vae_config.h (filesystem paths are not math). */
 
 /* ── activation bounds ───────────────────────────────────── */
-#define ELU_ALPHA 0.2f
-#define LOGVAR_MIN (-10.0f)
+#define ELU_ALPHA 1.0f  /* was 0.2 — standard ELU alpha; stronger gradients for negative activations */
+#define LOGVAR_MIN (-4.0f)  /* was -10: sigma as low as 0.007 encouraged deterministic encoding */
 #define LOGVAR_MAX 4.0f
 #define SIGMOID_CLAMP 15.0f
 #define ELU_CLAMP (-15.0f) /* lower bound for expf()  */

@@ -54,14 +54,7 @@ $(EXE_DIR)/vae_model: $(MAIN_SRC) $(CORE_SRCS) $(HEADERS)
 	@mkdir -p $(EXE_DIR)
 	$(CC) $(CFLAGS) $(IFLAGS) -o $@ $(MAIN_SRC) $(CORE_SRCS) $(LIBS)
 
-# ── v2: medium model, binary digits (0-1) ─────────────────────────────
-v2: mid
-mid: $(MAIN_SRC) $(CORE_SRCS) $(HEADERS)
-	@mkdir -p $(EXE_DIR)
-	$(CC) $(CFLAGS) $(IFLAGS) -DVERSION_V2 -o $(EXE_DIR)/vae_model \
-	    $(MAIN_SRC) $(CORE_SRCS) $(LIBS)
-
-# ── v3: large model, full MNIST (0-9) ─────────────────────────────────
+# ── v3: full MNIST (0-9) ──────────────────────────────────────────────
 # Note: -DFULL_MNIST removed; digit mode is now a runtime flag (--full-mnist)
 full: $(MAIN_SRC) $(CORE_SRCS) $(HEADERS)
 	@mkdir -p $(EXE_DIR)
@@ -92,18 +85,13 @@ omp-mini: $(MAIN_SRC) $(CORE_SRCS) $(HEADERS)
 	$(CC) $(CFLAGS) $(IFLAGS) $(LIBOMP_CFLAGS) \
 	    -o $(EXE_DIR)/vae_model_omp_mini $(MAIN_SRC) $(CORE_SRCS) $(LIBS) $(LIBOMP_LIBS)
 
-omp-mid: $(MAIN_SRC) $(CORE_SRCS) $(HEADERS)
-	@mkdir -p $(EXE_DIR)
-	$(CC) $(CFLAGS) $(IFLAGS) $(LIBOMP_CFLAGS) -DVERSION_V2 \
-	    -o $(EXE_DIR)/vae_model_omp_mid $(MAIN_SRC) $(CORE_SRCS) $(LIBS) $(LIBOMP_LIBS)
-
 omp-full: $(MAIN_SRC) $(CORE_SRCS) $(HEADERS)
 	@mkdir -p $(EXE_DIR)
 	$(CC) $(CFLAGS) $(IFLAGS) $(LIBOMP_CFLAGS) -DVERSION_V3 \
 	    -o $(EXE_DIR)/vae_model_omp_full $(MAIN_SRC) $(CORE_SRCS) $(LIBS) $(LIBOMP_LIBS)
 
 # Convenience alias — builds all three OMP variants at once.
-omp: omp-mini omp-mid omp-full
+omp: omp-mini omp-full
 
 # ── results viewer (standalone, no VAE dependency) ────────────────────
 $(EXE_DIR)/view_results: $(SRC)/view_results.c
@@ -150,4 +138,4 @@ tsan: $(TEST_SRCS) $(HEADERS)
 clean:
 	rm -rf $(EXE_DIR) *.o *.pgm results_main models
 
-.PHONY: all mini v2 mid full debug asan omp omp-mini omp-mid omp-full test tsan clean
+.PHONY: all mini full debug asan omp omp-mini omp-full test tsan clean

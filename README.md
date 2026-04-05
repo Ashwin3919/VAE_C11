@@ -25,18 +25,18 @@ The secondary goal was to write that code at a standard that would hold up under
 
 ```bash
 # 1. Get the MNIST data (one-time download)
-./download_mnist.sh
+./scripts/download_mnist.sh
 
-# 2. Build and train the mini model (digits 0 & 1, ~385K params)
+# 2. Build and train v1 (digits 0 & 1, ~385K params)
 make
 ./exe/vae_model
 
-# 3. Train the full model (all 10 digits, ~1.7M params)
+# 3. Train v3 (all 10 digits, ~406K params)
 make full
-./exe/vae_model
+./exe/vae_model --full-mnist
 
 # 4. View generated PGM images
-./convert_to_png.sh          # converts results_main/*/  to PNG
+./scripts/convert_to_png.sh   # converts results_main/*/  to PNG
 
 # 5. Run the test suite (no MNIST data required)
 make test
@@ -54,20 +54,18 @@ Checkpoints are saved to `models/vae_vN.bin` every `save_every` epochs and reloa
 
 | Target | Binary | Model | Digits | Params | Epochs |
 |---|---|---|---|---|---|
-| `make` / `make all` | `exe/vae_model` | v1 Mini | 0 & 1 | ~385K | 300 |
-| `make mid` / `v2` | `exe/vae_model` | v2 Mid | 0 & 1 | ~934K | 400 |
-| `make full` | `exe/vae_model` | v3 Full | 0 – 9 | ~1.3M | 800 |
+| `make` / `make all` | `exe/vae_model` | v1 | 0 & 1 | ~385K | 300 |
+| `make full` | `exe/vae_model` | v3 | 0 – 9 | ~406K | 400 |
 | `make omp-mini` | `exe/vae_model_omp_mini` | v1 + OMP | 0 & 1 | ~385K | — |
-| `make omp-mid` | `exe/vae_model_omp_mid` | v2 + OMP | 0 & 1 | ~934K | — |
-| `make omp-full` | `exe/vae_model_omp_full` | v3 + OMP | 0 – 9 | ~1.3M | — |
-| `make omp` | all three above | — | — | — | — |
+| `make omp-full` | `exe/vae_model_omp_full` | v3 + OMP | 0 – 9 | ~406K | — |
+| `make omp` | both above | — | — | — | — |
 | `make debug` | `exe/vae_model_debug` | v1 | 0 & 1 | ~385K | — |
 | `make asan` | `exe/vae_model_asan` | v1 | 0 & 1 | ~385K | — |
 | `make test` | `exe/run_tests` | — | — | — | — |
 | `make tsan` | `exe/run_tests_tsan` | — | — | — | — |
 | `make clean` | — | — | — | — | — |
 
-The `omp-mini/mid/full` targets build with `-Xclang -fopenmp` (Apple Clang) or `-fopenmp` (GCC on Linux), activating `#pragma omp parallel for` inside `linear_batch`. All three variants exist so you can compare per-model throughput improvement directly. Requires `libomp` — on macOS: `brew install libomp`.
+The `omp-mini/full` targets build with `-Xclang -fopenmp` (Apple Clang) or `-fopenmp` (GCC on Linux), activating `#pragma omp parallel for` inside `linear_batch`. Requires `libomp` — on macOS: `brew install libomp`.
 The `debug` target disables optimisation and enables `-g` for clean stack traces.
 The `asan` target builds with `-fsanitize=address,undefined` for catching memory errors and undefined behaviour.
 The `tsan` target builds with `-fsanitize=thread` to validate OpenMP paths for data races.
@@ -80,7 +78,7 @@ The `tsan` target builds with `-fsanitize=thread` to validate OpenMP paths for d
 .
 ├── src/
 │   ├── main.c                    # Entry point — selects config, trains, generates
-│   ├── config/vae_config.c       # Runtime config presets (v1 / v2 / v3)
+│   ├── config/vae_config.c       # Runtime config presets (v1 / v3)
 │   ├── core/vae_model.c          # Forward pass, ELBO loss, backprop, Adam step
 │   ├── optimizer/vae_optimizer.c # Stateless adam_update() helper
 │   ├── rng/vae_rng.c             # xorshift-64 + Box-Muller, per-instance state
@@ -145,13 +143,29 @@ This is a **Conditional VAE (CVAE)**. The digit label is one-hot encoded and con
 L = BCE(x, x̂) / IMAGE_SIZE  +  β · KL(N(μ,σ²) ∥ N(0,I)) / latent
 ```
 
-`β` is linearly annealed from `beta_start` → `beta_end` over `beta_anneal` epochs after a `beta_warmup` phase, giving reconstruction space to converge before regularisation is tightened.
+`β` is linearly annealed from `beta_start` → `beta_end` over `beta_anneal` epochs after a `beta_warmup` phase, giving reconstruction space to converge before regularisation is tightened. `beta_end=0.2` was chosen so the KL term is comparable in weight to reconstruction — values much smaller (e.g. 0.0005) cause posterior collapse and break generation entirely.
 
 ---
 
 ## Configuration
 
-All hyperparameters and paths live in `VAEConfig`. There are no compile-time `#define` knobs for architecture sizes. Three presets are provided; any field can be overridden after calling a preset constructor:
+All hyperparameters and paths live in `VAEConfig`. There are no compile-time `#define` knobs for architecture sizes. Two presets are provided; any field can be overridden after calling a preset constructor.
+
+**Preset values:**
+
+| Field | v1 | v3 | Notes |
+|---|---|---|---|
+| `h1` / `h2` | 256 / 128 | 256 / 128 | Same — v1 capacity is sufficient for MNIST |
+| `latent` | 32 | 64 | Doubled for 5× more classes |
+| `num_classes` | 2 | 10 | |
+| `epochs` | 300 | 400 | |
+| `lr` | 0.001 | 0.0001 | v3 has 5× more batches/epoch; model converges in ~2 epochs, higher LR diverges |
+| `lr_warmup_epochs` | 30 | 5 | |
+| `beta_end` | 0.2 | 0.2 | |
+| `beta_warmup` | 50 | 50 | |
+| `beta_anneal` | 100 | 100 | β reaches max at epoch 150 |
+| `es_min_epoch` | 220 | 220 | Never stop before β has fully ramped + buffer |
+
 
 ```c
 VAEConfig cfg = vae_config_v1();  // start from a preset
@@ -189,7 +203,7 @@ if (!model) { /* handle OOM */ }
 | `result_dir` | `const char *` | Directory for generated PGM output files |
 | `model_dir` | `const char *` | Directory for checkpoint files |
 | `model_file` | `const char *` | Full path to the checkpoint file |
-| `version_tag` | `const char *` | Label printed in log output (`"v1"`, `"v2"`, `"v3"`) |
+| `version_tag` | `const char *` | Label printed in log output (`"v1"`, `"v3"`) |
 
 ---
 
@@ -214,7 +228,7 @@ typedef struct VAE {
 Benefits:
 - **One allocation, one free** — no fragmentation, predictable teardown.
 - **32-byte aligned** — slab is allocated via `aligned_alloc(32)` (one AVX2 register width). The compiler can emit `vmovaps` (aligned SIMD load) instead of `vmovups` in the GEMM inner loops, avoiding cache-line split penalties.
-- **No stack overflow** — even the largest variant (~1.7M params) lives entirely on the heap.
+- **No stack overflow** — even the largest variant (~406K params) lives entirely on the heap.
 - **Runtime integrity guard** — after all `NEXT()` pointer assignments, `create_vae` verifies `p == _mem + slab_size()` with an explicit `if / abort()`, not `assert()`. `assert()` is compiled out by `-DNDEBUG`; the runtime guard is always active and prints an actionable diagnostic with the byte-level delta.
 
 `create_vae` returns `NULL` on allocation failure — it never calls `exit()`.
@@ -316,7 +330,7 @@ Tests use a zero-dependency header-only framework (`test_framework.h`). All test
 ```bash
 make test
 # Output:
-# ALL 22765 TESTS PASSED   (exits 0; exits 1 on any failure)
+# ALL 22836 TESTS PASSED   (exits 0; exits 1 on any failure)
 ```
 
 | Suite | Tests |
