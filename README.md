@@ -109,7 +109,7 @@ L = BCE(x, x̂) / IMAGE_SIZE  +  β · KL(q(z|x) ∥ N(0,I)) / latent
 
 ```bash
 make test
-# ALL 22836 TESTS PASSED
+# ALL TESTS PASSED
 ```
 
 The test suite covers: RNG determinism and distribution correctness, Adam convergence and gradient ownership contracts, forward pass determinism, loss finiteness, checkpoint roundtrip, backward pass correctness via **numerical gradient check**, and integration tests verifying loss decreases and KL annealing schedule correctness.
