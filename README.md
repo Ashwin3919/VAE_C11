@@ -4,9 +4,6 @@ A ground-up implementation of a **Conditional Variational Autoencoder (CVAE)** i
 
 **Author:** Ashwin Shirke
 
-**All 10 digits (v3):**
-![All digits](results_example/example.png)
-
 **Digits 0 & 1 (v1):**
 ![Digits 0 and 1](results_example/v1.png)
 
@@ -102,6 +99,10 @@ L = BCE(x, x̂) / IMAGE_SIZE  +  β · KL(q(z|x) ∥ N(0,I)) / latent
 ```
 
 β is annealed from near-zero up to 0.2 during training, giving reconstruction time to converge before the latent space is regularised. Getting β right is critical — values too small cause posterior collapse and broken generation.
+
+
+**All 10 digits (v3):**
+![All digits](results_example/example.png)
 
 ---
 
