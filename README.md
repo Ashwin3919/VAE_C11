@@ -72,7 +72,7 @@ Both models use the same hidden layer widths. v3 only doubles the latent dimensi
 | `make omp` | Both OpenMP variants |
 | `make debug` | Debug build (`-g -O0`) |
 | `make asan` | AddressSanitizer + UBSan |
-| `make test` | Run 22,836 tests |
+| `make test` | Run all tests |
 | `make tsan` | ThreadSanitizer (validate OpenMP) |
 | `make clean` | Remove all build artifacts |
 
