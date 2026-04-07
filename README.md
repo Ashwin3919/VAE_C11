@@ -1,6 +1,6 @@
 # MNIST Conditional VAE in C
 
-A ground-up implementation of a **Conditional Variational Autoencoder (CVAE)** in pure C11, trained on MNIST digits, with zero external dependencies beyond `libc` and `libm`.
+A ground-up implementation of a **Conditional Variational Autoencoder (CVAE)** in C, trained on MNIST digits, with zero external dependencies beyond `libc` and `libm`.
 
 **Author:** Ashwin Shirke
 
