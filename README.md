@@ -117,6 +117,21 @@ The test suite covers: RNG determinism and distribution correctness, Adam conver
 
 ---
 
+
+## How to Use Saved Model
+
+Once a model has been trained and saved (e.g., to `models/vae_v1.bin`), you can skip the training phase entirely and generate digits directly from the loaded checkpoint using the `--generate` flag:
+
+```bash
+# Generate digits from the v1 (0 & 1) model
+./exe/vae_model --generate
+
+# Generate digits from the v3 (all 10 digits) model
+./exe/vae_model --full-mnist --generate
+```
+
+The generated `.pgm` images will be saved to your `results_main/` directory.
+
 ## References
 
 - Kingma & Welling, [*Auto-Encoding Variational Bayes*](https://arxiv.org/abs/1312.6114) (2013)
@@ -128,3 +143,5 @@ The test suite covers: RNG determinism and distribution correctness, Adam conver
 ## Contributing
 
 If you have recommendations or have spotted bugs, please raise a pull request. See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
+
+---

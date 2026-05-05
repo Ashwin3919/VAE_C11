@@ -20,8 +20,9 @@
 10. [Training Loop](#10-training-loop)
 11. [GEMM and Performance](#11-gemm-and-performance)
 12. [Checkpoint Format](#12-checkpoint-format)
-13. [Build System](#13-build-system)
-14. [Test Suite](#14-test-suite)
+13. [Inference and Generation](#13-inference-and-generation)
+14. [Build System](#14-build-system)
+15. [Test Suite](#15-test-suite)
 
 
 ---
@@ -448,7 +449,13 @@ Checkpoint files: `models/vae_v1.bin` (v1), `models/vae_v3.bin` (v3).
 
 ---
 
-## 13. Build System
+## 13. Inference and Generation
+
+Once a model is fully trained, inference can be performed directly from a saved checkpoint without invoking the training loop. Running the model with the `--generate` flag (e.g., `./exe/vae_model --generate` or `./exe/vae_model --full-mnist --generate`) bypasses dataset loading and backpropagation entirely. The model decodes digits conditioned on their class labels using `vae_decode()` and writes the resulting `.pgm` images to the `results_main/` directory.
+
+---
+
+## 14. Build System
 
 GNU Make with GCC. The `HEADERS` variable lists all public headers as a prerequisite for every binary target — any header change forces a full rebuild, preventing stale-object bugs without per-TU dependency files.
 
@@ -497,7 +504,7 @@ On Linux with GCC, override with: `make omp-mini LIBOMP_CFLAGS=-fopenmp LIBOMP_L
 
 ---
 
-## 14. Test Suite
+## 15. Test Suite
 
 `make test` compiles and runs `exe/run_tests`. No MNIST data is required. All tests are expected to print `ALL TESTS PASSED`.
 

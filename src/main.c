@@ -60,11 +60,14 @@ int main(int argc, char *argv[]) {
   /* ── runtime digit filter ─────────────────────────────────────────── */
   int allowed_digits[10];
   int n_allowed = 0; /* 0 = use config default */
+  int generate_only = 0;
 
   for (int i = 1; i < argc; i++) {
     if (strcmp(argv[i], "--full-mnist") == 0) {
       cfg.full_mnist = 1;
       n_allowed = 0; /* NULL filter → all digits */
+    } else if (strcmp(argv[i], "--generate") == 0) {
+      generate_only = 1;
     } else if (strcmp(argv[i], "--digits") == 0 && i + 1 < argc) {
       n_allowed = parse_digits(argv[++i], allowed_digits);
       if (n_allowed == 0)
@@ -97,14 +100,17 @@ int main(int argc, char *argv[]) {
   }
   load_model(m, cfg.model_file); /* resume if checkpoint exists */
 
-  Dataset *ds =
-      load_dataset(&cfg, n_allowed ? allowed_digits : NULL, n_allowed);
-  if (!ds) {
-    free_vae(m);
-    return 1;
-  }
+  if (!generate_only) {
+    Dataset *ds =
+        load_dataset(&cfg, n_allowed ? allowed_digits : NULL, n_allowed);
+    if (!ds) {
+      free_vae(m);
+      return 1;
+    }
 
-  train(m, ds);
+    train(m, ds);
+    free_dataset(ds);
+  }
 
   printf("\n[GEN] final samples per digit...\n");
   for (int cls = 0; cls < cfg.num_classes; cls++)
@@ -112,7 +118,6 @@ int main(int argc, char *argv[]) {
       generate_digit(m, cls, 0.8f, 9999, s);
   printf("[GEN] done -> %s/epoch_9999_digit*_s*.pgm\n", cfg.result_dir);
 
-  free_dataset(ds);
   free_vae(m);
   return 0;
 }
