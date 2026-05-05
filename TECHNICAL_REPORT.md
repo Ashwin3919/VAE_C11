@@ -42,7 +42,7 @@ Two trained variants are provided:
 | Variant | Digits | Latent dim | Parameters | Epochs | Train time |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **v1** | 0–1 | 32 | ~385K | 300 | ~30 min |
-| **v3** | 0–9 | 64 | ~406K | 400 | ~90 min |
+| **v2** | 0–9 | 64 | ~406K | 400 | ~90 min |
 
 ---
 
@@ -55,7 +55,7 @@ Both variants are symmetric MLPs (Encoder + Decoder) with ELU activations throug
 ```
 enc_in = IMAGE_SIZE + num_classes   →  h1  →  h2  →  μ, log σ²
          (784 + 2 = 786 for v1)         256    128    latent
-         (784 + 10 = 794 for v3)
+         (784 + 10 = 794 for v2)
 ```
 
 The encoder takes the concatenation of the flattened image (784 floats) and a one-hot class label (2 or 10 floats), passes it through two ELU-activated fully-connected layers, then produces two parallel linear projections: **μ (mu)** and **log σ² (logvar)**, each of dimension `latent`.
@@ -76,14 +76,14 @@ z = μ + exp(0.5 · logvar) · ε
 ```
 dec_in = latent + num_classes   →  h1  →  h2  →  IMAGE_SIZE
          (32 + 2 = 34 for v1)       256    128    784
-         (64 + 10 = 74 for v3)
+         (64 + 10 = 74 for v2)
 ```
 
 The decoder takes the concatenation of the sampled latent vector `z` and the one-hot label, and reconstructs the image through two ELU layers followed by a sigmoid output layer.
 
 ### Layer dimensions summary
 
-| Layer | v1 shape | v3 shape | Activation |
+| Layer | v1 shape | v2 shape | Activation |
 | :--- | :--- | :--- | :--- |
 | `enc_w1`, `enc_b1` | 786×256, 256 | 794×256, 256 | ELU |
 | `enc_w2`, `enc_b2` | 256×128, 128 | 256×128, 128 | ELU |
@@ -93,7 +93,7 @@ The decoder takes the concatenation of the sampled latent vector `z` and the one
 | `dec_w2`, `dec_b2` | 256×128, 128 | 256×128, 128 | ELU |
 | `dec_w3`, `dec_b3` | 128×784, 784 | 128×784, 784 | Sigmoid |
 
-**Why same hidden dims for both variants?** v1 (2 classes) demonstrated that 256/128 is sufficient capacity for MNIST. v3 only needs more latent dimensions — not more hidden width — to separate 10 classes. An earlier v3 design with 640/320 hidden layers (~1.3M params) caused training instability with no quality improvement.
+**Why same hidden dims for both variants?** v1 (2 classes) demonstrated that 256/128 is sufficient capacity for MNIST. v2 only needs more latent dimensions — not more hidden width — to separate 10 classes. An earlier v2 design with 640/320 hidden layers (~1.3M params) caused training instability with no quality improvement.
 
 **Weight initialisation:** He initialisation — `w ~ N(0, sqrt(2 / fan_in))` — applied to all weight matrices. The logvar head weights are additionally scaled by 0.01 to keep the initial encoder variance near N(0,1), reducing the risk of early posterior collapse.
 
@@ -105,7 +105,7 @@ All hyperparameters are defined in `VAEConfig` (`include/vae_config.h`) and set 
 
 ### Architecture parameters
 
-| Parameter | Type | v1 | v3 | Description |
+| Parameter | Type | v1 | v2 | Description |
 | :--- | :--- | :--- | :--- | :--- |
 | `h1` | `int` | 256 | 256 | Width of first hidden layer |
 | `h2` | `int` | 128 | 128 | Width of second hidden layer |
@@ -116,7 +116,7 @@ All hyperparameters are defined in `VAEConfig` (`include/vae_config.h`) and set 
 
 ### Training parameters
 
-| Parameter | Type | v1 | v3 | Description |
+| Parameter | Type | v1 | v2 | Description |
 | :--- | :--- | :--- | :--- | :--- |
 | `batch_size` | `int` | 64 | 64 | Samples per gradient step |
 | `epochs` | `int` | 300 | 400 | Maximum training epochs |
@@ -131,16 +131,16 @@ All hyperparameters are defined in `VAEConfig` (`include/vae_config.h`) and set 
 | `es_min_epoch` | `int` | 220 | 220 | Early stopping: never fire before this epoch |
 | `save_every` | `int` | 50 | 50 | Checkpoint interval (also triggers sample generation) |
 
-### v3 learning rate rationale
+### v2 learning rate rationale
 
-The LR schedule is per-epoch, not per-step. v3 (54K training samples) has approximately 843 batches per epoch versus v1's 178. At the same peak LR:
+The LR schedule is per-epoch, not per-step. v2 (54K training samples) has approximately 843 batches per epoch versus v1's 178. At the same peak LR:
 
 | | Batches/epoch | Adam steps at warmup end |
 | :--- | :--- | :--- |
 | v1 | 178 | 5,340 |
-| v3 | 843 | 25,290 (4.7× more) |
+| v2 | 843 | 25,290 (4.7× more) |
 
-v3 reaches good reconstruction loss within ~2 epochs (~1,700 Adam steps). Any LR above 0.0001 disrupts a model that has already found a good loss basin. `lr_warmup_epochs=5` was chosen so the LR peaks early and the cosine decay phase covers the full 395 remaining epochs including KL annealing.
+v2 reaches good reconstruction loss within ~2 epochs (~1,700 Adam steps). Any LR above 0.0001 disrupts a model that has already found a good loss basin. `lr_warmup_epochs=5` was chosen so the LR peaks early and the cosine decay phase covers the full 395 remaining epochs including KL annealing.
 
 ### Activation and numeric constants (`include/vae_math.h`)
 
@@ -327,7 +327,7 @@ The xorshift-64 state is initialised so that `state = 0` is replaced with `1` (a
 
 ### Dataset split
 
-After loading MNIST, a Fisher-Yates shuffle (using the model's RNG) is performed once, then the dataset is split 90% train / 10% validation. v1 loads only digits 0–1 (~12K training samples); v3 loads all 10 digits (~54K).
+After loading MNIST, a Fisher-Yates shuffle (using the model's RNG) is performed once, then the dataset is split 90% train / 10% validation. v1 loads only digits 0–1 (~12K training samples); v2 loads all 10 digits (~54K).
 
 ### Per-epoch training
 
@@ -377,7 +377,7 @@ else:
     beta = beta_start + (beta_end − beta_start) · p
 ```
 
-For both v1 and v3: warmup ends at epoch 50, annealing finishes at epoch 150. The model is fully training under the regularised ELBO objective from epoch 150 onward.
+For both v1 and v2: warmup ends at epoch 50, annealing finishes at epoch 150. The model is fully training under the regularised ELBO objective from epoch 150 onward.
 
 ### Early stopping
 
@@ -420,7 +420,7 @@ OpenMP is compiled out when `_OPENMP` is not defined, so the binary builds witho
 | Variant | Serial | OpenMP | Speedup |
 | :--- | :--- | :--- | :--- |
 | v1 | ~1,500 img/s | ~4,100 img/s | ~2.7× |
-| v3 | ~1,400 img/s | ~4,100 img/s | ~2.9× |
+| v2 | ~1,400 img/s | ~4,100 img/s | ~2.9× |
 
 ---
 
@@ -445,7 +445,7 @@ Little-endian binary, portable across host architectures. Each `float` is writte
 
 On restart, `load_model()` reads the checkpoint and resumes training from the saved `adam_t` step. The LR and β schedules are epoch-based and recomputed from `epoch` — they are not stored in the checkpoint.
 
-Checkpoint files: `models/vae_v1.bin` (v1), `models/vae_v3.bin` (v3).
+Checkpoint files: `models/vae_v1.bin` (v1), `models/vae_v2.bin` (v2).
 
 ---
 
@@ -481,9 +481,9 @@ CFLAGS = -Wall -Wextra -O3 -std=c11 -march=native \
 | Target | Binary | Notes |
 | :--- | :--- | :--- |
 | `make` / `make mini` | `exe/vae_model` | v1, digits 0–1 |
-| `make full` | `exe/vae_model` | v3, all 10 digits (`-DVERSION_V3`) |
+| `make full` | `exe/vae_model` | v2, all 10 digits (`-DVERSION_V2`) |
 | `make omp-mini` | `exe/vae_model_omp_mini` | v1 with OpenMP |
-| `make omp-full` | `exe/vae_model_omp_full` | v3 with OpenMP |
+| `make omp-full` | `exe/vae_model_omp_full` | v2 with OpenMP |
 | `make omp` | both OMP variants | |
 | `make debug` | `exe/vae_model_debug` | `-g -O0 -DDEBUG` |
 | `make asan` | `exe/vae_model_asan` | AddressSanitizer + UBSan |

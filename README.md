@@ -1,4 +1,4 @@
-# MNIST Conditional VAE in C
+# Conditional VAE in C : No PyTorch/JAX 
 
 A ground-up implementation of a **Conditional Variational Autoencoder (CVAE)** in C, trained on MNIST digits, with zero external dependencies beyond `libc` and `libm`.
 
@@ -48,7 +48,7 @@ Training is fully resumable — checkpoints are saved to `models/vae_vN.bin` and
 
 ## Models
 
-| | v1 | v3 |
+| | v1 | v2 |
 |---|---|---|
 | Digits | 0 & 1 | 0 – 9 |
 | Parameters | ~385K | ~406K |
@@ -57,7 +57,7 @@ Training is fully resumable — checkpoints are saved to `models/vae_vN.bin` and
 | Speed (serial) | ~1,500 img/s | ~1,400 img/s |
 | Speed (OpenMP) | ~4,100 img/s | ~4,100 img/s |
 
-Both models use the same hidden layer widths. v3 only doubles the latent dimension (32→64) to accommodate 5× more classes — no extra hidden capacity is needed.
+Both models use the same hidden layer widths. v2 only doubles the latent dimension (32→64) to accommodate 5× more classes — no extra hidden capacity is needed.
 
 ---
 
@@ -66,9 +66,9 @@ Both models use the same hidden layer widths. v3 only doubles the latent dimensi
 | Target | Description |
 |---|---|
 | `make` | v1 — digits 0 & 1 |
-| `make full` | v3 — all 10 digits |
+| `make full` | v2 — all 10 digits |
 | `make omp-mini` | v1 with OpenMP (requires `brew install libomp`) |
-| `make omp-full` | v3 with OpenMP |
+| `make omp-full` | v2 with OpenMP |
 | `make omp` | Both OpenMP variants |
 | `make debug` | Debug build (`-g -O0`) |
 | `make asan` | AddressSanitizer + UBSan |
@@ -101,7 +101,7 @@ L = BCE(x, x̂) / IMAGE_SIZE  +  β · KL(q(z|x) ∥ N(0,I)) / latent
 β is annealed from near-zero up to 0.2 during training, giving reconstruction time to converge before the latent space is regularised. Getting β right is critical — values too small cause posterior collapse and broken generation.
 
 
-**All 10 digits (v3):**
+**All 10 digits (v2):**
 ![All digits](results_example/example.png)
 
 ---
@@ -126,7 +126,7 @@ Once a model has been trained and saved (e.g., to `models/vae_v1.bin`), you can 
 # Generate digits from the v1 (0 & 1) model
 ./exe/vae_model --generate
 
-# Generate digits from the v3 (all 10 digits) model
+# Generate digits from the v2 (all 10 digits) model
 ./exe/vae_model --full-mnist --generate
 ```
 
